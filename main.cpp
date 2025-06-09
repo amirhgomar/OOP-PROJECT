@@ -177,6 +177,7 @@ public:
     void displayCircuit() const;
     void simulateTransient(double startTime, double endTime, double timeStep);
     void simulateMultipleVariables(double startTime, double endTime, double timeStep);
+    void simulateDCVoltageSweep(double startVoltage, double endVoltage, double stepVoltage);
     bool hasGround() const;
     void displayNodes() const;
     bool renameNode(int oldNodeNum, int newNodeNum);
@@ -235,6 +236,13 @@ int getUserChoice();
 void handleAddComponent(Circuit& circuit);
 void handleRemoveElement(Circuit& circuit);
 void handleModifyComponent(Circuit& circuit);
+void handleErrorComponentNotFound(const string& componentName) {
+    cout << "Error: Component '" << componentName << "' not found in the circuit." << endl;
+}
+
+void handleErrorNodeNotFound(int node) {
+    cout << "Error: Node '" << node << "' not found in the circuit." << endl;
+}
 void pauseSystem();
 void handleTransientAnalysis(Circuit& circuit);
 void handleMultipleVariablesAnalysis(Circuit& circuit);
@@ -253,23 +261,24 @@ int main() {
             case 3: handleRemoveElement(myCircuit); pauseSystem(); break;
             case 4: handleModifyComponent(myCircuit); pauseSystem(); break;
             case 5: handleTransientAnalysis(myCircuit); pauseSystem(); break;
-            case 6: {
-                double startTime, endTime, timeStep;
-                cout << "--- Multiple Variables Analysis ---" << endl;
-                cout << "Enter start time: ";
-                cin >> startTime;
-                cout << "Enter end time: ";
-                cin >> endTime;
-                cout << "Enter time step: ";
-                cin >> timeStep;
-                myCircuit.simulateMultipleVariables(startTime, endTime, timeStep);
+            case 6: handleMultipleVariablesAnalysis(myCircuit); pauseSystem(); break;
+            case 7: {
+                double startVoltage, endVoltage, stepVoltage;
+                cout << "--- DC Sweep Voltage Analysis ---" << endl;
+                cout << "Enter start voltage: ";
+                cin >> startVoltage;
+                cout << "Enter end voltage: ";
+                cin >> endVoltage;
+                cout << "Enter voltage step: ";
+                cin >> stepVoltage;
+                myCircuit.simulateDCVoltageSweep(startVoltage, endVoltage, stepVoltage);
                 pauseSystem();
                 break;
             }
-            case 7: handleDisplayNodes(myCircuit); pauseSystem(); break;
-            case 8: handleRenameNode(myCircuit); pauseSystem(); break;
-            case 9: running = false; cout << "Exiting..." << endl; break;
-            default: cout << "Invalid choice." << endl; pauseSystem(); break;
+            case 8: handleDisplayNodes(myCircuit); pauseSystem(); break;
+            case 9: handleRenameNode(myCircuit); pauseSystem(); break;
+            case 10: running = false; cout << "Exiting..." << endl; break;
+
         }
     }
 
@@ -344,8 +353,26 @@ void Circuit::simulateMultipleVariables(double startTime, double endTime, double
         cout << "-----------------" << endl;
     }
 }
+void Circuit::simulateDCVoltageSweep(double startVoltage, double endVoltage, double stepVoltage) {
+    for (double voltage = startVoltage; voltage <= endVoltage; voltage += stepVoltage) {
+        cout << "Voltage Sweep: " << voltage << "V" << endl;
+        for (const auto& comp : components) {
+            if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+                vs->setDCOffsetValue(voltage);
+                cout << "Voltage Source " << vs->getName() << " Voltage: "
+                     << scientific << setprecision(4) << vs->getValueAtTime(0) << " V" << endl;
+            }
+        }
+        for (const auto& comp : components) {
+            if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
+                cout << "Current Source " << cs->getName() << " Current: "
+                     << scientific << setprecision(4) << cs->getValueAtTime(0) << " A" << endl;
+            }
+        }
 
-
+        cout << "-----------------" << endl;
+    }
+}
 bool Circuit::hasGround() const {
     for (const auto& comp : components) {
         if (comp->getNode1() == 0 || comp->getNode2() == 0) {
@@ -568,7 +595,7 @@ void handleRemoveElement(Circuit& circuit) {
     if (circuit.removeElement(name)) {
         cout << "Success: Component '" << name << "' has been removed." << endl;
     } else {
-        cout << "Error: Component '" << name << "' not found." << endl;
+        handleErrorComponentNotFound(name);
     }
 }
 
@@ -581,7 +608,7 @@ void handleModifyComponent(Circuit& circuit) {
 
     Component* comp = circuit.findElement(name);
     if (comp == nullptr) {
-        cout << "Error: Component '" << name << "' not found." << endl;
+        handleErrorComponentNotFound(name);
         return;
     }
 
@@ -713,9 +740,10 @@ void displayMenu() {
     cout << "4. Modify Component" << endl;
     cout << "5. Run Transient Analysis" << endl;
     cout << "6. Run Multiple Variables Analysis" << endl;
-    cout << "7. Display Existing Nodes"<< endl;
-    cout << "8. Rename Node"<< endl;
-    cout << "9. Exit" << endl;
+    cout << "7. Run DC Voltage Sweep Analysis" << endl;
+    cout << "8. Display Existing Nodes"<< endl;
+    cout << "9. Rename Node"<< endl;
+    cout << "10. Exit" << endl;
     cout << "=======================================" << endl;
     cout << "Enter your choice: ";
 }
