@@ -176,6 +176,7 @@ public:
     void displayCircuit() const;
     void simulateTransient(double startTime, double endTime, double timeStep);
     void simulateMultipleVariables(double startTime, double endTime, double timeStep);
+    void simulateDCVoltageSweep(double startVoltage, double endVoltage, double stepVoltage);
     bool hasGround() const;
     const vector<unique_ptr<Component>>& getComponents() const { return components; }
 };
@@ -282,27 +283,27 @@ int main() {
             case 3: handleRemoveElement(myCircuit); pauseSystem(); break;
             case 4: handleModifyComponent(myCircuit); pauseSystem(); break;
             case 5: handleTransientAnalysis(myCircuit); pauseSystem(); break;
-            case 6: {
-                double startTime, endTime, timeStep;
-                cout << "--- Multiple Variables Analysis ---" << endl;
-                cout << "Enter start time: ";
-                cin >> startTime;
-                cout << "Enter end time: ";
-                cin >> endTime;
-                cout << "Enter time step: ";
-                cin >> timeStep;
-                myCircuit.simulateMultipleVariables(startTime, endTime, timeStep); // اجرای تحلیل
+            case 6: handleMultipleVariablesAnalysis(myCircuit); pauseSystem(); break;
+            case 7: {
+                double startVoltage, endVoltage, stepVoltage;
+                cout << "--- DC Sweep Voltage Analysis ---" << endl;
+                cout << "Enter start voltage: ";
+                cin >> startVoltage;
+                cout << "Enter end voltage: ";
+                cin >> endVoltage;
+                cout << "Enter voltage step: ";
+                cin >> stepVoltage;
+                myCircuit.simulateDCVoltageSweep(startVoltage, endVoltage, stepVoltage);
                 pauseSystem();
                 break;
             }
-            case 7: running = false; cout << "Exiting..." << endl; break;
+            case 8: running = false; cout << "Exiting..." << endl; break;
             default: cout << "Invalid choice." << endl; pauseSystem(); break;
         }
     }
 
     return 0;
 }
-
 void Circuit::addElement(unique_ptr<Component> newComponent) { components.push_back(move(newComponent)); }
 void Circuit::displayCircuit() const {
     if (components.empty()) {
@@ -355,8 +356,26 @@ void Circuit::simulateMultipleVariables(double startTime, double endTime, double
         cout << "-----------------" << endl;
     }
 }
+void Circuit::simulateDCVoltageSweep(double startVoltage, double endVoltage, double stepVoltage) {
+    for (double voltage = startVoltage; voltage <= endVoltage; voltage += stepVoltage) {
+        cout << "Voltage Sweep: " << voltage << "V" << endl;
+        for (const auto& comp : components) {
+            if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+                vs->setDCOffsetValue(voltage);
+                cout << "Voltage Source " << vs->getName() << " Voltage: "
+                     << scientific << setprecision(4) << vs->getValueAtTime(0) << " V" << endl;
+            }
+        }
+        for (const auto& comp : components) {
+            if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
+                cout << "Current Source " << cs->getName() << " Current: "
+                     << scientific << setprecision(4) << cs->getValueAtTime(0) << " A" << endl;
+            }
+        }
 
-
+        cout << "-----------------" << endl;
+    }
+}
 bool Circuit::hasGround() const {
     for (const auto& comp : components) {
         if (comp->getNode1() == 0 || comp->getNode2() == 0) {
@@ -633,7 +652,8 @@ void displayMenu() {
     cout << "4. Modify Component" << endl;
     cout << "5. Run Transient Analysis" << endl;
     cout << "6. Run Multiple Variables Analysis" << endl;
-    cout << "7. Exit" << endl;
+    cout << "7. Run DC Voltage Sweep Analysis" << endl;
+    cout << "8. Exit" << endl;
     cout << "=======================================" << endl;
     cout << "Enter your choice: ";
 }
