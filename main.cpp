@@ -174,6 +174,7 @@ public:
     bool removeElement(const string& componentName);
     Component* findElement(const string& componentName);
     void displayCircuit() const;
+    void simulateTransient(double startTime, double endTime, double timeStep);
     bool hasGround() const;
 };
 
@@ -222,7 +223,17 @@ void handleAddComponent(Circuit& circuit);
 void handleRemoveElement(Circuit& circuit);
 void handleModifyComponent(Circuit& circuit);
 void pauseSystem();
-
+void handleTransientAnalysis(Circuit& circuit) {
+    double startTime, endTime, timeStep;
+    cout << "--- Transient Analysis ---" << endl;
+    cout << "Enter start time: ";
+    cin >> startTime;
+    cout << "Enter end time: ";
+    cin >> endTime;
+    cout << "Enter time step: ";
+    cin >> timeStep;
+    circuit.simulateTransient(startTime, endTime, timeStep);
+}
 int main() {
     Circuit myCircuit;
     bool running = true;
@@ -234,14 +245,14 @@ int main() {
             case 2: myCircuit.displayCircuit(); pauseSystem(); break;
             case 3: handleRemoveElement(myCircuit); pauseSystem(); break;
             case 4: handleModifyComponent(myCircuit); pauseSystem(); break;
-            case 5: running = false; cout << "Exiting..." << endl; break;
+            case 5: handleTransientAnalysis(myCircuit); pauseSystem(); break;
+            case 6: running = false; cout << "Exiting..." << endl; break;
             default: cout << "Invalid choice." << endl; pauseSystem(); break;
         }
     }
 
     return 0;
 }
-
 void Circuit::addElement(unique_ptr<Component> newComponent) { components.push_back(move(newComponent)); }
 void Circuit::displayCircuit() const {
     if (components.empty()) {
@@ -262,6 +273,22 @@ void Circuit::displayCircuit() const {
     }
     cout << "--------------------------------------------------------" << endl;
 }
+void Circuit::simulateTransient(double startTime, double endTime, double timeStep) {
+    for (double time = startTime; time <= endTime; time += timeStep) {
+        cout << "Time: " << time << "s" << endl;
+        for (const auto& comp : components) {
+            if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+                cout << "Voltage Source " << vs->getName() << " Voltage: "
+                     << scientific << setprecision(4) << vs->getValueAtTime(time) << " V" << endl;
+            } else if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
+                cout << "Current Source " << cs->getName() << " Current: "
+                     << scientific << setprecision(4) << cs->getValueAtTime(time) << " A" << endl;
+            }
+        }
+        cout << "-----------------" << endl;
+    }
+}
+
 
 bool Circuit::hasGround() const {
     for (const auto& comp : components) {
@@ -537,7 +564,8 @@ void displayMenu() {
     cout << "2. Display Circuit" << endl;
     cout << "3. Remove Component" << endl;
     cout << "4. Modify Component" << endl;
-    cout << "5. Exit" << endl;
+    cout << "5. Run Transient Analysis" << endl;
+    cout << "6. Exit" << endl;
     cout << "=======================================" << endl;
     cout << "Enter your choice: ";
 }

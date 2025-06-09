@@ -51,7 +51,7 @@ build cmake_object_order_depends_target_PHASE1: phony || .
 
 build CMakeFiles/PHASE1.dir/main.cpp.obj: CXX_COMPILER__PHASE1_unscanned_Debug C$:/Users/amirhossein/CLionProjects/Project/PHASE1/main.cpp || cmake_object_order_depends_target_PHASE1
   DEP_FILE = CMakeFiles\PHASE1.dir\main.cpp.obj.d
-  FLAGS = -g -std=gnu++1z -fdiagnostics-color=always
+  FLAGS = -g -std=gnu++20 -fdiagnostics-color=always
   OBJECT_DIR = CMakeFiles\PHASE1.dir
   OBJECT_FILE_DIR = CMakeFiles\PHASE1.dir
   TARGET_COMPILE_PDB = CMakeFiles\PHASE1.dir\
