@@ -169,6 +169,7 @@ public:
 class Circuit {
 private:
     vector<unique_ptr<Component>> components;
+    set<int> getAllNodes() const;
 public:
     void addElement(unique_ptr<Component> newComponent);
     bool removeElement(const string& componentName);
@@ -177,9 +178,19 @@ public:
     void simulateTransient(double startTime, double endTime, double timeStep);
     void simulateMultipleVariables(double startTime, double endTime, double timeStep);
     bool hasGround() const;
+    void displayNodes() const;
+    bool renameNode(int oldNodeNum, int newNodeNum);
     const vector<unique_ptr<Component>>& getComponents() const { return components; }
 };
 
+set<int> Circuit::getAllNodes() const {
+    set<int> unique_nodes;
+    for (const auto& comp : components) {
+        unique_nodes.insert(comp->getNode1());
+        unique_nodes.insert(comp->getNode2());
+    }
+    return unique_nodes;
+}
 double parseEngineeringValue(const string& valStr) {
     if (valStr.empty()) return 0.0;
     size_t first_char_pos = string::npos;
@@ -225,43 +236,10 @@ void handleAddComponent(Circuit& circuit);
 void handleRemoveElement(Circuit& circuit);
 void handleModifyComponent(Circuit& circuit);
 void pauseSystem();
-void handleTransientAnalysis(Circuit& circuit) {
-    double startTime, endTime, timeStep;
-    cout << "--- Transient Analysis ---" << endl;
-    cout << "Enter start time: ";
-    cin >> startTime;
-    cout << "Enter end time: ";
-    cin >> endTime;
-    cout << "Enter time step: ";
-    cin >> timeStep;
-    circuit.simulateTransient(startTime, endTime, timeStep);
-}
-void handleMultipleVariablesAnalysis(Circuit& circuit) {
-    double startTime, endTime, timeStep;
-    cout << "--- Multiple Variables Analysis ---" << endl;
-    cout << "Enter start time: ";
-    cin >> startTime;
-    cout << "Enter end time: ";
-    cin >> endTime;
-    cout << "Enter time step: ";
-    cin >> timeStep;
-
-    cout << "\n--- Displaying Voltage and Current at Different Times ---" << endl;
-
-    for (double time = startTime; time <= endTime; time += timeStep) {
-        cout << "Time: " << time << "s" << endl;
-        for (const auto& comp : circuit.getComponents()) {
-            if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
-                cout << "Voltage Source " << vs->getName() << " Voltage: "
-                     << scientific << setprecision(4) << vs->getValueAtTime(time) << " V" << endl;
-            } else if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
-                cout << "Current Source " << cs->getName() << " Current: "
-                     << scientific << setprecision(4) << cs->getValueAtTime(time) << " A" << endl;
-            }
-        }
-        cout << "-----------------" << endl;
-    }
-}
+void handleTransientAnalysis(Circuit& circuit);
+void handleMultipleVariablesAnalysis(Circuit& circuit);
+void handleDisplayNodes(const Circuit& circuit);
+void handleRenameNode(Circuit& circuit);
 
 int main() {
     Circuit myCircuit;
@@ -284,16 +262,34 @@ int main() {
                 cin >> endTime;
                 cout << "Enter time step: ";
                 cin >> timeStep;
-                myCircuit.simulateMultipleVariables(startTime, endTime, timeStep); // اجرای تحلیل
+                myCircuit.simulateMultipleVariables(startTime, endTime, timeStep);
                 pauseSystem();
                 break;
             }
-            case 7: running = false; cout << "Exiting..." << endl; break;
+            case 7: handleDisplayNodes(myCircuit); pauseSystem(); break;
+            case 8: handleRenameNode(myCircuit); pauseSystem(); break;
+            case 9: running = false; cout << "Exiting..." << endl; break;
             default: cout << "Invalid choice." << endl; pauseSystem(); break;
         }
     }
 
     return 0;
+}
+
+void handleDisplayNodes(const Circuit& circuit) {
+    circuit.displayNodes();
+}
+
+void handleRenameNode(Circuit& circuit) {
+    int oldNum, newNum;
+    cout << "--- Rename Node ---" << endl;
+    cout << "Enter the node number you want to rename: ";
+    cin >> oldNum;
+    cout << "Enter the new node number: ";
+    cin >> newNum;
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+    circuit.renameNode(oldNum, newNum);
 }
 
 void Circuit::addElement(unique_ptr<Component> newComponent) { components.push_back(move(newComponent)); }
@@ -358,6 +354,57 @@ bool Circuit::hasGround() const {
     }
     return false;
 }
+bool Circuit::renameNode(int oldNodeNum, int newNodeNum) {
+    auto allNodes = getAllNodes();
+
+
+    if (allNodes.find(oldNodeNum) == allNodes.end()) {
+       cout << "Error: Node " << oldNodeNum << " does not exist in the circuit." << endl;
+        return false;
+    }
+
+    if (oldNodeNum != newNodeNum && allNodes.find(newNodeNum) != allNodes.end()) {
+        cout << "Error: Node " << newNodeNum << " already exists. Cannot merge nodes." << endl;
+        return false;
+    }
+
+    for (auto& comp : components) {
+        int n1 = comp->getNode1();
+        int n2 = comp->getNode2();
+
+        bool changed = false;
+        if (n1 == oldNodeNum) {
+            n1 = newNodeNum;
+            changed = true;
+        }
+        if (n2 == oldNodeNum) {
+            n2 = newNodeNum;
+            changed = true;
+        }
+
+        if (changed) {
+            comp->setNodes(n1, n2);
+        }
+    }
+
+    cout << "Success: Node " << oldNodeNum << " has been renamed to " << newNodeNum << " throughout the circuit." << endl;
+    return true;
+}
+void Circuit::displayNodes() const {
+    if (components.empty()) {
+        cout << "Circuit is empty, no nodes to display." << endl;
+        return;
+    }
+
+    auto unique_nodes = getAllNodes();
+
+    cout << "--- Existing Nodes in Circuit ---" << endl;
+    for (int node : unique_nodes) {
+        cout << node << " ";
+    }
+    cout << endl;
+    cout << "---------------------------------" << endl;
+}
 
 bool Circuit::removeElement(const string& componentName) {
     for (auto it = components.begin(); it != components.end(); ++it) {
@@ -371,6 +418,45 @@ Component* Circuit::findElement(const string& componentName) {
         if (comp->getName() == componentName) { return comp.get(); }
     }
     return nullptr;
+}
+
+void handleTransientAnalysis(Circuit& circuit) {
+    double startTime, endTime, timeStep;
+    cout << "--- Transient Analysis ---" << endl;
+    cout << "Enter start time: ";
+    cin >> startTime;
+    cout << "Enter end time: ";
+    cin >> endTime;
+    cout << "Enter time step: ";
+    cin >> timeStep;
+    circuit.simulateTransient(startTime, endTime, timeStep);
+}
+
+void handleMultipleVariablesAnalysis(Circuit& circuit) {
+    double startTime, endTime, timeStep;
+    cout << "--- Multiple Variables Analysis ---" << endl;
+    cout << "Enter start time: ";
+    cin >> startTime;
+    cout << "Enter end time: ";
+    cin >> endTime;
+    cout << "Enter time step: ";
+    cin >> timeStep;
+
+    cout << "\n--- Displaying Voltage and Current at Different Times ---" << endl;
+
+    for (double time = startTime; time <= endTime; time += timeStep) {
+        cout << "Time: " << time << "s" << endl;
+        for (const auto& comp : circuit.getComponents()) {
+            if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+                cout << "Voltage Source " << vs->getName() << " Voltage: "
+                     << scientific << setprecision(4) << vs->getValueAtTime(time) << " V" << endl;
+            } else if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
+                cout << "Current Source " << cs->getName() << " Current: "
+                     << scientific << setprecision(4) << cs->getValueAtTime(time) << " A" << endl;
+            }
+        }
+        cout << "-----------------" << endl;
+    }
 }
 
 void handleAddComponent(Circuit& circuit) {
@@ -485,6 +571,7 @@ void handleRemoveElement(Circuit& circuit) {
         cout << "Error: Component '" << name << "' not found." << endl;
     }
 }
+
 
 void handleModifyComponent(Circuit& circuit) {
     string name;
@@ -626,7 +713,9 @@ void displayMenu() {
     cout << "4. Modify Component" << endl;
     cout << "5. Run Transient Analysis" << endl;
     cout << "6. Run Multiple Variables Analysis" << endl;
-    cout << "7. Exit" << endl;
+    cout << "7. Display Existing Nodes"<< endl;
+    cout << "8. Rename Node"<< endl;
+    cout << "9. Exit" << endl;
     cout << "=======================================" << endl;
     cout << "Enter your choice: ";
 }
