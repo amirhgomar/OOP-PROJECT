@@ -224,6 +224,13 @@ int getUserChoice();
 void handleAddComponent(Circuit& circuit);
 void handleRemoveElement(Circuit& circuit);
 void handleModifyComponent(Circuit& circuit);
+void handleErrorComponentNotFound(const string& componentName) {
+    cout << "Error: Component '" << componentName << "' not found in the circuit." << endl;
+}
+
+void handleErrorNodeNotFound(int node) {
+    cout << "Error: Node '" << node << "' not found in the circuit." << endl;
+}
 void pauseSystem();
 void handleTransientAnalysis(Circuit& circuit) {
     double startTime, endTime, timeStep;
@@ -482,7 +489,7 @@ void handleRemoveElement(Circuit& circuit) {
     if (circuit.removeElement(name)) {
         cout << "Success: Component '" << name << "' has been removed." << endl;
     } else {
-        cout << "Error: Component '" << name << "' not found." << endl;
+        handleErrorComponentNotFound(name);
     }
 }
 
@@ -494,7 +501,7 @@ void handleModifyComponent(Circuit& circuit) {
 
     Component* comp = circuit.findElement(name);
     if (comp == nullptr) {
-        cout << "Error: Component '" << name << "' not found." << endl;
+        handleErrorComponentNotFound(name);
         return;
     }
 
