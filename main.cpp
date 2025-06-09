@@ -175,7 +175,9 @@ public:
     Component* findElement(const string& componentName);
     void displayCircuit() const;
     void simulateTransient(double startTime, double endTime, double timeStep);
+    void simulateMultipleVariables(double startTime, double endTime, double timeStep);
     bool hasGround() const;
+    const vector<unique_ptr<Component>>& getComponents() const { return components; }
 };
 
 double parseEngineeringValue(const string& valStr) {
@@ -234,6 +236,33 @@ void handleTransientAnalysis(Circuit& circuit) {
     cin >> timeStep;
     circuit.simulateTransient(startTime, endTime, timeStep);
 }
+void handleMultipleVariablesAnalysis(Circuit& circuit) {
+    double startTime, endTime, timeStep;
+    cout << "--- Multiple Variables Analysis ---" << endl;
+    cout << "Enter start time: ";
+    cin >> startTime;
+    cout << "Enter end time: ";
+    cin >> endTime;
+    cout << "Enter time step: ";
+    cin >> timeStep;
+
+    cout << "\n--- Displaying Voltage and Current at Different Times ---" << endl;
+
+    for (double time = startTime; time <= endTime; time += timeStep) {
+        cout << "Time: " << time << "s" << endl;
+        for (const auto& comp : circuit.getComponents()) {
+            if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+                cout << "Voltage Source " << vs->getName() << " Voltage: "
+                     << scientific << setprecision(4) << vs->getValueAtTime(time) << " V" << endl;
+            } else if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
+                cout << "Current Source " << cs->getName() << " Current: "
+                     << scientific << setprecision(4) << cs->getValueAtTime(time) << " A" << endl;
+            }
+        }
+        cout << "-----------------" << endl;
+    }
+}
+
 int main() {
     Circuit myCircuit;
     bool running = true;
@@ -246,13 +275,27 @@ int main() {
             case 3: handleRemoveElement(myCircuit); pauseSystem(); break;
             case 4: handleModifyComponent(myCircuit); pauseSystem(); break;
             case 5: handleTransientAnalysis(myCircuit); pauseSystem(); break;
-            case 6: running = false; cout << "Exiting..." << endl; break;
+            case 6: {
+                double startTime, endTime, timeStep;
+                cout << "--- Multiple Variables Analysis ---" << endl;
+                cout << "Enter start time: ";
+                cin >> startTime;
+                cout << "Enter end time: ";
+                cin >> endTime;
+                cout << "Enter time step: ";
+                cin >> timeStep;
+                myCircuit.simulateMultipleVariables(startTime, endTime, timeStep); // اجرای تحلیل
+                pauseSystem();
+                break;
+            }
+            case 7: running = false; cout << "Exiting..." << endl; break;
             default: cout << "Invalid choice." << endl; pauseSystem(); break;
         }
     }
 
     return 0;
 }
+
 void Circuit::addElement(unique_ptr<Component> newComponent) { components.push_back(move(newComponent)); }
 void Circuit::displayCircuit() const {
     if (components.empty()) {
@@ -281,6 +324,23 @@ void Circuit::simulateTransient(double startTime, double endTime, double timeSte
                 cout << "Voltage Source " << vs->getName() << " Voltage: "
                      << scientific << setprecision(4) << vs->getValueAtTime(time) << " V" << endl;
             } else if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
+                cout << "Current Source " << cs->getName() << " Current: "
+                     << scientific << setprecision(4) << cs->getValueAtTime(time) << " A" << endl;
+            }
+        }
+        cout << "-----------------" << endl;
+    }
+}
+void Circuit::simulateMultipleVariables(double startTime, double endTime, double timeStep) {
+    for (double time = startTime; time <= endTime; time += timeStep) {
+        cout << "Time: " << time << "s" << endl;
+
+        for (const auto& comp : components) {
+            if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+                cout << "Voltage Source " << vs->getName() << " Voltage: "
+                     << scientific << setprecision(4) << vs->getValueAtTime(time) << " V" << endl;
+            }
+            if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
                 cout << "Current Source " << cs->getName() << " Current: "
                      << scientific << setprecision(4) << cs->getValueAtTime(time) << " A" << endl;
             }
@@ -565,7 +625,8 @@ void displayMenu() {
     cout << "3. Remove Component" << endl;
     cout << "4. Modify Component" << endl;
     cout << "5. Run Transient Analysis" << endl;
-    cout << "6. Exit" << endl;
+    cout << "6. Run Multiple Variables Analysis" << endl;
+    cout << "7. Exit" << endl;
     cout << "=======================================" << endl;
     cout << "Enter your choice: ";
 }
