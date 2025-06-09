@@ -51,6 +51,8 @@ public:
     }
     string getType() const override { return "Resistor"; }
     void setResistance(double res) { this->resistance = res; }
+    double getResistance() const { return resistance; }
+
 };
 
 class Capacitor : public Component {
@@ -67,6 +69,8 @@ public:
     }
     string getType() const override { return "Capacitor"; }
     void setCapacitance(double cap) { this->capacitance = cap; }
+    double getCapacitance() const { return capacitance; }
+
 };
 
 class Inductor : public Component {
@@ -83,6 +87,8 @@ public:
     }
     string getType() const override { return "Inductor"; }
     void setInductance(double ind) { this->inductance = ind; }
+    double getInductance() const { return inductance; }
+
 };
 
 class VoltageSource : public Component {
@@ -176,6 +182,9 @@ public:
     Component* findElement(const string& componentName);
     void displayCircuit() const;
     void simulateTransient(double startTime, double endTime, double timeStep);
+    double calculateVoltageDrop(Resistor* res, double time, int targetNode) ;
+    double calculateVoltage(Capacitor* cap, double time, int targetNode) ;
+    double calculateVoltage(Inductor* ind, double time, int targetNode) ;
     void simulateMultipleVariables(double startTime, double endTime, double timeStep);
     void simulateDCVoltageSweep(double startVoltage, double endVoltage, double stepVoltage);
     bool hasGround() const;
@@ -329,9 +338,16 @@ void Circuit::simulateTransient(double startTime, double endTime, double timeSte
         cout << "Error: Start time cannot be greater than end time." << endl;
         return;
     }
-    for (double time = startTime; time <= endTime + timeStep/2; time += timeStep) {
+
+    int targetNode;
+    cout << "Enter the node number to monitor: ";
+    cin >> targetNode;
+
+    for (double time = startTime; time <= endTime + timeStep / 2; time += timeStep) {
         cout << "Time: " << scientific << setprecision(4) << time << "s" << endl;
+
         bool sourcesFound = false;
+
         for (const auto& comp : components) {
             if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
                 cout << "Voltage Source " << vs->getName() << " Voltage: "
@@ -343,12 +359,46 @@ void Circuit::simulateTransient(double startTime, double endTime, double timeSte
                 sourcesFound = true;
             }
         }
+
+        for (const auto& comp : components) {
+            if (comp->getNode1() == targetNode || comp->getNode2() == targetNode) {
+                if (auto res = dynamic_cast<Resistor*>(comp.get())) {
+                    double voltageDrop = calculateVoltageDrop(res, time, targetNode);
+                    double current = voltageDrop / res->getResistance();
+                    cout << "At Node " << targetNode << " (Resistor " << res->getName() << "): "
+                         << "Voltage: " << scientific << setprecision(4) << voltageDrop << " V, "
+                         << "Current: " << scientific << setprecision(4) << current << " A" << endl;
+                } else if (auto cap = dynamic_cast<Capacitor*>(comp.get())) {
+                    double voltage = calculateVoltage(cap, time, targetNode);
+                    cout << "At Node " << targetNode << " (Capacitor " << cap->getName() << "): "
+                         << "Voltage: " << scientific << setprecision(4) << voltage << " V" << endl;
+                } else if (auto ind = dynamic_cast<Inductor*>(comp.get())) {
+                    double voltage = calculateVoltage(ind, time, targetNode);
+                    cout << "At Node " << targetNode << " (Inductor " << ind->getName() << "): "
+                         << "Voltage: " << scientific << setprecision(4) << voltage << " V" << endl;
+                }
+            }
+        }
+
         if (!sourcesFound) {
             cout << "No active sources found to simulate." << endl;
         }
         cout << "-----------------" << endl;
     }
 }
+
+double Circuit::calculateVoltageDrop(Resistor* res, double time, int targetNode) {
+    return res->getResistance();
+}
+
+double Circuit::calculateVoltage(Capacitor* cap, double time, int targetNode) {
+    return cap->getCapacitance();
+}
+
+double Circuit::calculateVoltage(Inductor* ind, double time, int targetNode) {
+    return ind->getInductance();
+}
+
 void Circuit::simulateMultipleVariables(double startTime, double endTime, double timeStep) {
     if (timeStep <= 0) {
         cout << "Error: Time step must be a positive value." << endl;
