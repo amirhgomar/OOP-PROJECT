@@ -187,6 +187,7 @@ public:
     double calculateVoltage(Inductor* ind, double time, int targetNode) ;
     void simulateMultipleVariables(double startTime, double endTime, double timeStep);
     void simulateDCVoltageSweep(double startVoltage, double endVoltage, double stepVoltage);
+    void simulateDCCurrentSweep(double startCurrent, double endCurrent, double stepCurrent) ;
     bool hasGround() const;
     void displayNodes() const;
     bool renameNode(int oldNodeNum, int newNodeNum);
@@ -286,9 +287,22 @@ int main() {
                 pauseSystem();
                 break;
             }
-            case 8: handleDisplayNodes(myCircuit); pauseSystem(); break;
-            case 9: handleRenameNode(myCircuit); pauseSystem(); break;
-            case 10: running = false; cout << "Exiting..." << endl; break;
+            case 8: {
+                double startCurrent, endCurrent, stepCurrent;
+                cout << "--- DC Sweep Current Analysis ---" << endl;
+                cout << "Enter start current: ";
+                safelyReadDouble(startCurrent);
+                cout << "Enter end current: ";
+                safelyReadDouble(endCurrent);
+                cout << "Enter current step: ";
+                safelyReadDouble(stepCurrent);
+                myCircuit.simulateDCCurrentSweep(startCurrent, endCurrent, stepCurrent);  // This function needs to be implemented
+                pauseSystem();
+                break;
+            }
+            case 9: handleDisplayNodes(myCircuit); pauseSystem(); break;
+            case 10: handleRenameNode(myCircuit); pauseSystem(); break;
+            case 11: running = false; cout << "Exiting..." << endl; break;
             default: cout << "Invalid choice. Please try again." << endl; pauseSystem(); break;
         }
     }
@@ -515,6 +529,68 @@ bool Circuit::renameNode(int oldNodeNum, int newNodeNum) {
     cout << "Success: Node " << oldNodeNum << " has been renamed to " << newNodeNum << " throughout the circuit." << endl;
     return true;
 }
+void Circuit::simulateDCCurrentSweep(double startCurrent, double endCurrent, double stepCurrent) {
+    if (stepCurrent == 0) {
+        cout << "Error: Current step cannot be zero for a sweep." << endl;
+        return;
+    }
+    if ((startCurrent < endCurrent && stepCurrent < 0) || (startCurrent > endCurrent && stepCurrent > 0)) {
+        cout << "Error: Step direction is incorrect for the given start and end currents." << endl;
+        return;
+    }
+
+    bool currentSourceFound = false;
+    for (const auto& comp : components) {
+        if (dynamic_cast<CurrentSource*>(comp.get())) {
+            currentSourceFound = true;
+            break;
+        }
+    }
+    if (!currentSourceFound) {
+        cout << "No current sources found in the circuit to perform a DC current sweep." << endl;
+        return;
+    }
+
+    int targetNode;
+    cout << "Enter the node number to monitor for current sweep: ";
+    cin >> targetNode;
+
+    double current = startCurrent;
+    while ((stepCurrent > 0 && current <= endCurrent + stepCurrent / 2) || (stepCurrent < 0 && current >= endCurrent + stepCurrent / 2)) {
+        cout << "Current Sweep: " << scientific << setprecision(4) << current << " A" << endl;
+        for (const auto& comp : components) {
+            if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
+                cs->setDCOffsetValue(current);
+                cout << "Current Source " << cs->getName() << " Current: "
+                     << scientific << setprecision(4) << cs->getValueAtTime(0) << " A" << endl;
+            }
+        }
+
+        for (const auto& comp : components) {
+            if (comp->getNode1() == targetNode || comp->getNode2() == targetNode) {
+                if (auto res = dynamic_cast<Resistor*>(comp.get())) {
+                    double voltageDrop = calculateVoltageDrop(res, 0, targetNode);
+                    double currentInResistor = voltageDrop / res->getResistance();
+                    cout << "At Node " << targetNode << " (Resistor " << res->getName() << "): "
+                         << "Voltage: " << scientific << setprecision(4) << voltageDrop << " V, "
+                         << "Current: " << scientific << setprecision(4) << currentInResistor << " A" << endl;
+                } else if (auto cap = dynamic_cast<Capacitor*>(comp.get())) {
+                    double voltage = calculateVoltage(cap, 0, targetNode);
+                    cout << "At Node " << targetNode << " (Capacitor " << cap->getName() << "): "
+                         << "Voltage: " << scientific << setprecision(4) << voltage << " V" << endl;
+                } else if (auto ind = dynamic_cast<Inductor*>(comp.get())) {
+                    double voltage = calculateVoltage(ind, 0, targetNode);
+                    cout << "At Node " << targetNode << " (Inductor " << ind->getName() << "): "
+                         << "Voltage: " << scientific << setprecision(4) << voltage << " V" << endl;
+                }
+            }
+        }
+
+        current += stepCurrent;
+        cout << "-----------------" << endl;
+    }
+}
+
 void Circuit::displayNodes() const {
     if (components.empty()) {
         cout << "Circuit is empty, no nodes to display." << endl;
@@ -825,9 +901,10 @@ void displayMenu() {
     cout << "5. Run Transient Analysis" << endl;
     cout << "6. Run Multiple Variables Analysis" << endl;
     cout << "7. Run DC Voltage Sweep Analysis" << endl;
-    cout << "8. Display Existing Nodes"<< endl;
-    cout << "9. Rename Node"<< endl;
-    cout << "10. Exit" << endl;
+    cout << "8. Run DC Current Sweep Analysis" << endl;
+    cout << "9. Display Existing Nodes" << endl;
+    cout << "10. Rename Node" << endl;
+    cout << "11. Exit" << endl;
     cout << "=======================================" << endl;
     cout << "Enter your choice: ";
 }
