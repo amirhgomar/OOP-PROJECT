@@ -232,7 +232,7 @@ public:
     bool removeElement(const string& componentName);
     Component* findElement(const string& componentName);
     void displayCircuit() const;
-    void simulateTransient(double startTime, double endTime, double timeStep);
+    void runTransientAnalysis(double startTime, double endTime, double timeStep);
     void simulateMultipleVariables(double startTime, double endTime, double timeStep);
     void simulateDCVoltageSweep(double startVoltage, double endVoltage, double stepVoltage);
     void simulateDCCurrentSweep(double startCurrent, double endCurrent, double stepCurrent);
@@ -336,7 +336,7 @@ void handleDisplayAndSelectCircuits(CircuitManager& manager);
 
 int main() {
     CircuitManager myCircuitManager;
-    myCircuitManager.createNewCircuit(); // Start with one default circuit
+    myCircuitManager.createNewCircuit();
 
     bool running = true;
     while (running) {
@@ -764,72 +764,126 @@ double Circuit::getComponentCurrent(const string& name) const {
     return 0.0;
 }
 
-void Circuit::simulateTransient(double startTime, double endTime, double timeStep) {
-    if (timeStep <= 0) {
-        cout << "Error: Time step must be a positive value." << endl;
-        return;
-    }
-    if (startTime > endTime) {
-        cout << "Error: Start time cannot be greater than end time." << endl;
-        return;
-    }
+
+void Circuit::runTransientAnalysis(double startTime, double endTime, double timeStep) {
     if (!hasGround()) {
-        cout << "Error: Circuit must have a ground node (0) for simulation." << endl;
+        cout << "Error: Circuit must have a ground node (0) for analysis." << endl;
+        return;
+    }
+    if (timeStep <= 0) {
+        cout << "Error: Time step must be a positive number." << endl;
         return;
     }
 
-    set<int> all_nodes = getAllNodes();
-    int targetNode;
-    if (!safelyReadInt(targetNode, "Enter the node number to observe (or 'b' to go back): ")){
-        return;
-    }
-
-    if (all_nodes.find(targetNode) == all_nodes.end() && targetNode != 0) {
-        handleErrorNodeNotFound(targetNode);
-        return;
-    }
-
-    nodeVoltages.clear();
-    componentCurrents.clear();
-    previousNodeVoltages.clear();
-    previousComponentCurrents.clear();
-    for(int node : all_nodes) {
-        previousNodeVoltages[node] = 0.0;
-    }
-    for(const auto& comp: components) {
-        previousComponentCurrents[comp->getName()] = 0.0;
-    }
-
-    cout << "\n--- Transient Simulation Results (Observing Node " << targetNode << ") ---" << endl;
-    for (double time = startTime; time <= endTime + timeStep / 2; time += timeStep) {
-        cout << "\nTime: " << scientific << setprecision(4) << time << "s" << endl;
-        if (!setupAndSolveMNA(time, timeStep)) {
-            cout << "Circuit analysis failed at this time step." << endl;
-            break;
+    map<int, int> nodeMap;
+    int nodeCount = 0;
+    for (const auto& comp : components) {
+        if (comp->getNode1() != 0 && nodeMap.find(comp->getNode1()) == nodeMap.end()) {
+            nodeMap[comp->getNode1()] = ++nodeCount;
         }
+        if (comp->getNode2() != 0 && nodeMap.find(comp->getNode2()) == nodeMap.end()) {
+            nodeMap[comp->getNode2()] = ++nodeCount;
+        }
+    }
 
-        cout << "  Node " << targetNode << " Voltage: " << scientific << setprecision(4) << getNodeVoltage(targetNode) << " V" << endl;
+    map<string, int> inductorMap;
+    int inductorCount = 0;
+    map<string, int> voltageSourceMap;
+    int voltageSourceCount = 0;
+
+    for (const auto& comp : components) {
+        if (dynamic_cast<Inductor*>(comp.get())) {
+            inductorMap[comp->getName()] = inductorCount++;
+        } else if (dynamic_cast<VoltageSource*>(comp.get())) {
+            voltageSourceMap[comp->getName()] = voltageSourceCount++;
+        }
+    }
+
+    int matrixSize = nodeCount + inductorCount + voltageSourceCount;
+    if (matrixSize <= 0) {
+        cout << "Circuit has no unknowns to solve for." << endl;
+        return;
+    }
+
+    Eigen::VectorXd x_prev = Eigen::VectorXd::Zero(matrixSize);
+
+    cout << "--- Starting Transient Analysis ---" << endl;
+    cout << scientific << setprecision(6);
+
+    for (double time = startTime; time <= endTime; time += timeStep) {
+        Eigen::MatrixXd A = Eigen::MatrixXd::Zero(matrixSize, matrixSize);
+        Eigen::VectorXd z = Eigen::VectorXd::Zero(matrixSize);
 
         for (const auto& comp : components) {
-            if (auto ind = dynamic_cast<Inductor*>(comp.get())) {
-                double current = getComponentCurrent(comp->getName());
-                double previousCurrent = previousComponentCurrents[comp->getName()];
-                double voltage = getNodeVoltage(ind->getNode1()) - getNodeVoltage(ind->getNode2());
-                double inductance = ind->getInductance();
+            int n1 = comp->getNode1();
+            int n2 = comp->getNode2();
+            int mapped_n1 = (n1 == 0) ? -1 : nodeMap.at(n1) - 1;
+            int mapped_n2 = (n2 == 0) ? -1 : nodeMap.at(n2) - 1;
 
-                double dI = (voltage / inductance) * timeStep;
-                current += dI;
-
-                componentCurrents[comp->getName()] = current;
+            if (auto r = dynamic_cast<Resistor*>(comp.get())) {
+                double g = 1.0 / r->getResistance();
+                if (mapped_n1 != -1) A(mapped_n1, mapped_n1) += g;
+                if (mapped_n2 != -1) A(mapped_n2, mapped_n2) += g;
+                if (mapped_n1 != -1 && mapped_n2 != -1) {
+                    A(mapped_n1, mapped_n2) -= g;
+                    A(mapped_n2, mapped_n1) -= g;
+                }
+            }
+            else if (auto c = dynamic_cast<Capacitor*>(comp.get())) {
+                double c_h = c->getCapacitance() / timeStep;
+                if (mapped_n1 != -1) A(mapped_n1, mapped_n1) += c_h;
+                if (mapped_n2 != -1) A(mapped_n2, mapped_n2) += c_h;
+                if (mapped_n1 != -1 && mapped_n2 != -1) {
+                    A(mapped_n1, mapped_n2) -= c_h;
+                    A(mapped_n2, mapped_n1) -= c_h;
+                }
+                double v_prev = (mapped_n1 != -1 ? x_prev(mapped_n1) : 0.0) - (mapped_n2 != -1 ? x_prev(mapped_n2) : 0.0);
+                double ic_prev = c_h * v_prev;
+                if (mapped_n1 != -1) z(mapped_n1) += ic_prev;
+                if (mapped_n2 != -1) z(mapped_n2) -= ic_prev;
+            }
+            else if (auto l = dynamic_cast<Inductor*>(comp.get())) {
+                int l_idx = nodeCount + inductorMap.at(l->getName());
+                double l_h = l->getInductance() / timeStep;
+                if (mapped_n1 != -1) A(mapped_n1, l_idx) += 1.0;
+                if (mapped_n2 != -1) A(mapped_n2, l_idx) -= 1.0;
+                if (mapped_n1 != -1) A(l_idx, mapped_n1) += 1.0;
+                if (mapped_n2 != -1) A(l_idx, mapped_n2) -= 1.0;
+                A(l_idx, l_idx) -= l_h;
+                z(l_idx) -= l_h * x_prev(l_idx);
+            }
+            else if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+                int vs_idx = nodeCount + inductorCount + voltageSourceMap.at(vs->getName());
+                if (mapped_n1 != -1) A(mapped_n1, vs_idx) += 1.0;
+                if (mapped_n2 != -1) A(mapped_n2, vs_idx) -= 1.0;
+                if (mapped_n1 != -1) A(vs_idx, mapped_n1) += 1.0;
+                if (mapped_n2 != -1) A(vs_idx, mapped_n2) -= 1.0;
+                z(vs_idx) += vs->getValueAtTime(time);
+            }
+            else if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
+                double i_val = cs->getValueAtTime(time);
+                if (mapped_n1 != -1) z(mapped_n1) -= i_val;
+                if (mapped_n2 != -1) z(mapped_n2) += i_val;
             }
         }
 
-        previousNodeVoltages = nodeVoltages;
-        previousComponentCurrents = componentCurrents;
-    }
-    cout << "--- Transient Simulation Finished ---" << endl;
-}
+        Eigen::VectorXd x_t = A.colPivHouseholderQr().solve(z);
 
+        cout << "\nTime: " << time << "s" << endl;
+        for (auto const& [node_num, matrix_idx] : nodeMap) {
+            cout << "  V(node " << node_num << "): " << x_t(matrix_idx - 1) << " V" << endl;
+        }
+        for (auto const& [l_name, matrix_idx] : inductorMap) {
+            cout << "  I(" << l_name << "): " << x_t[nodeCount + matrix_idx] << " A" << endl;
+        }
+        for (auto const& [vs_name, matrix_idx] : voltageSourceMap) {
+            cout << "  I(" << vs_name << "): " << x_t[nodeCount + inductorCount + matrix_idx] << " A" << endl;
+        }
+
+        x_prev = x_t;
+    }
+    cout << "--- Transient Analysis Finished ---" << endl;
+}
 void Circuit::simulateMultipleVariables(double startTime, double endTime, double timeStep) {
     if (timeStep <= 0) {
         cout << "Error: Time step must be a positive value." << endl;
@@ -1071,27 +1125,31 @@ Component* Circuit::findElement(const string& componentName) {
     return nullptr;
 }
 
+
 void handleTransientAnalysis(Circuit& circuit) {
-    bool sub_menu_running = true;
-    while (sub_menu_running) {
-        double startTime, endTime, timeStep;
-        cout << "\n--- Transient Analysis for " << circuit.getCircuitName() << " ---" << endl;
-        if (!safelyReadDouble(startTime, "Enter start time (s) (or 'b' to go back to main menu): ")) {
-            sub_menu_running = false;
-            break;
-        }
-        if (!safelyReadDouble(endTime, "Enter end time (s) (or 'b' to go back to main menu): ")) {
-            sub_menu_running = false;
-            break;
-        }
-        if (!safelyReadDouble(timeStep, "Enter time step (s) (or 'b' to go back to main menu): ")) {
-            sub_menu_running = false;
-            break;
-        }
-        circuit.simulateTransient(startTime, endTime, timeStep);
-        pauseSystem();
-        sub_menu_running = false;
+    double startTime = 0.0, endTime = 0.0, timeStep = 0.0;
+    cout << "--- Transient Analysis ---" << endl;
+
+    cout << "Enter start time: ";
+    cin >> startTime;
+
+    cout << "Enter end time: ";
+    cin >> endTime;
+
+    cout << "Enter time step: ";
+    cin >> timeStep;
+
+
+    if (cin.fail()) {
+        cout << "\nError: Invalid numeric input. Please enter numbers only." << endl;
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        return;
     }
+
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+    circuit.runTransientAnalysis(startTime, endTime, timeStep);
 }
 
 void handleMultipleVariablesAnalysis(Circuit& circuit) {
@@ -1473,7 +1531,7 @@ void Circuit::saveCircuit(const string& filename) const {
         return;
     }
 
-    outFile << "CIRCUIT_NAME " << circuitName << endl; // Save circuit name
+    outFile << "CIRCUIT_NAME " << circuitName << endl;
     for (const auto& comp : components) {
         outFile << comp->serialize() << endl;
     }
@@ -1491,17 +1549,16 @@ bool Circuit::loadCircuit(const string& filename) {
 
     components.clear();
     string line;
-    string loadedCircuitName = "Unnamed Circuit"; // Default name
+    string loadedCircuitName = "Unnamed Circuit";
     if (getline(inFile, line)) {
         stringstream ss_name(line);
         string keyword;
         ss_name >> keyword;
         if (keyword == "CIRCUIT_NAME") {
-            getline(ss_name, loadedCircuitName); // Read the rest of the line as circuit name
-            if (loadedCircuitName.rfind(' ') == 0) loadedCircuitName.erase(0, 1); // Remove leading space if any
+            getline(ss_name, loadedCircuitName);
+            if (loadedCircuitName.rfind(' ') == 0) loadedCircuitName.erase(0, 1);
         } else {
-            // If the first line is not CIRCUIT_NAME, it's probably an old format or corrupted.
-            // Rewind and process it as a component line.
+
             inFile.seekg(0);
         }
     }
@@ -1672,10 +1729,10 @@ void CircuitManager::removeActiveCircuit() {
             circuits.erase(circuits.begin() + activeCircuitIndex);
             cout << "Active circuit deleted." << endl;
             if (!circuits.empty()) {
-                activeCircuitIndex = 0; // Set first circuit as active
+                activeCircuitIndex = 0;
                 cout << "First circuit '" << circuits[activeCircuitIndex]->getCircuitName() << "' is now active." << endl;
             } else {
-                activeCircuitIndex = -1; // No circuits left
+                activeCircuitIndex = -1;
                 cout << "No circuits left." << endl;
             }
         } else {
