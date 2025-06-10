@@ -11,6 +11,7 @@
 #include <cmath>
 #include <limits>
 #include <sstream>
+#include <fstream>
 #include "Eigen/Dense"
 
 using namespace std;
@@ -36,6 +37,7 @@ public:
 
     virtual void display() const = 0;
     virtual string getType() const = 0;
+    virtual string serialize() const = 0;
 
     string getName() const { return name; }
     void setNodes(int newNode1, int newNode2) {
@@ -62,9 +64,14 @@ public:
              << " | Nodes: (" << node1 << ", " << node2 << ")" << endl;
     }
     string getType() const override { return "Resistor"; }
+    string serialize() const override {
+        stringstream ss;
+        ss << "Resistor " << name << " " << resistance << " " << node1 << " " << node2;
+        return ss.str();
+    }
+
     void setResistance(double res) { this->resistance = res; }
     double getResistance() const { return resistance; }
-
 };
 
 class Capacitor : public Component {
@@ -80,9 +87,14 @@ public:
         cout << "  - Element: " << name << " | Type: " << getType() << " | Value: " << scientific << setprecision(4) << capacitance << " " << unit << " | Nodes: (" << node1 << ", " << node2 << ")" << endl;
     }
     string getType() const override { return "Capacitor"; }
+    string serialize() const override {
+        stringstream ss;
+        ss << "Capacitor " << name << " " << capacitance << " " << node1 << " " << node2;
+        return ss.str();
+    }
+
     void setCapacitance(double cap) { this->capacitance = cap; }
     double getCapacitance() const { return capacitance; }
-
 };
 
 class Inductor : public Component {
@@ -98,15 +110,19 @@ public:
         cout << "  - Element: " << name << " | Type: " << getType() << " | Value: " << scientific << setprecision(4) << inductance << " " << unit << " | Nodes: (" << node1 << ", " << node2 << ")" << endl;
     }
     string getType() const override { return "Inductor"; }
+    string serialize() const override {
+        stringstream ss;
+        ss << "Inductor " << name << " " << inductance << " " << node1 << " " << node2;
+        return ss.str();
+    }
+
     void setInductance(double ind) { this->inductance = ind; }
     double getInductance() const { return inductance; }
-
 };
 
 class VoltageSource : public Component {
 public:
     enum class Waveform { DC, SINE };
-
 private:
     Waveform waveformType;
     double offset_or_dc_value;
@@ -122,7 +138,6 @@ public:
     VoltageSource(const string& name, double offset, double amp, double freq, int n1, int n2)
             : Component(name, n1, n2), waveformType(Waveform::SINE), offset_or_dc_value(offset),
               amplitude(amp), frequency(freq), unit("V") {}
-
 
     double getValueAtTime(double time) const {
         if (waveformType == Waveform::SINE) return offset_or_dc_value + amplitude * sin(2 * M_PI * frequency * time);
@@ -140,6 +155,12 @@ public:
     }
 
     string getType() const override { return "Voltage Source"; }
+    string serialize() const override {
+        stringstream ss;
+        ss << "VoltageSource " << name << " " << (waveformType == Waveform::DC ? "DC" : "SINE") << " "
+           << offset_or_dc_value << " " << amplitude << " " << frequency << " " << node1 << " " << node2;
+        return ss.str();
+    }
 
     Waveform getWaveformType() const { return waveformType; }
     void setDCOffsetValue(double val) { this->offset_or_dc_value = val; }
@@ -150,7 +171,6 @@ public:
 class CurrentSource : public Component {
 public:
     enum class Waveform { DC, SINE };
-
 private:
     Waveform waveformType;
     double offset_or_dc_value;
@@ -166,7 +186,6 @@ public:
     CurrentSource(const string& name, double offset, double amp, double freq, int n1, int n2)
             : Component(name, n1, n2), waveformType(Waveform::SINE), offset_or_dc_value(offset),
               amplitude(amp), frequency(freq), unit("A") {}
-
 
     double getValueAtTime(double time) const {
         if (waveformType == Waveform::SINE) return offset_or_dc_value + amplitude * sin(2 * M_PI * frequency * time);
@@ -184,6 +203,13 @@ public:
     }
 
     string getType() const override { return "Current Source"; }
+    string serialize() const override {
+        stringstream ss;
+        ss << "CurrentSource " << name << " " << (waveformType == Waveform::DC ? "DC" : "SINE") << " "
+           << offset_or_dc_value << " " << amplitude << " " << frequency << " " << node1 << " " << node2;
+        return ss.str();
+    }
+
     Waveform getWaveformType() const { return waveformType; }
     void setDCOffsetValue(double val) { this->offset_or_dc_value = val; }
     void setAmplitude(double amp) { this->amplitude = amp; }
@@ -198,8 +224,10 @@ private:
     map<string, double> componentCurrents;
     map<int, double> previousNodeVoltages;
     map<string, double> previousComponentCurrents;
+    string circuitName;
 
 public:
+    Circuit(string name = "Unnamed Circuit") : circuitName(name) {}
     void addElement(unique_ptr<Component> newComponent);
     bool removeElement(const string& componentName);
     Component* findElement(const string& componentName);
@@ -212,10 +240,13 @@ public:
     void displayNodes() const;
     bool renameNode(int oldNodeNum, int newNodeNum);
     const vector<unique_ptr<Component>>& getComponents() const { return components; }
-
     bool setupAndSolveMNA(double time, double timeStep);
     double getNodeVoltage(int node) const;
     double getComponentCurrent(const string& name) const;
+    void saveCircuit(const string& filename) const;
+    bool loadCircuit(const string& filename);
+    string getCircuitName() const { return circuitName; }
+    void setCircuitName(const string& name) { circuitName = name; }
 };
 
 set<int> Circuit::getAllNodes() const {
@@ -226,6 +257,7 @@ set<int> Circuit::getAllNodes() const {
     }
     return unique_nodes;
 }
+
 double parseEngineeringValue(const string& valStr) {
     if (valStr.empty()) return 0.0;
     size_t first_char_pos = string::npos;
@@ -265,18 +297,27 @@ ComponentType intToComponentType(int choice) {
     }
 }
 
-void displayMenu();
+class CircuitManager {
+private:
+    vector<unique_ptr<Circuit>> circuits;
+    int activeCircuitIndex = -1;
+
+public:
+    void createNewCircuit();
+    void displayAllCircuits() const;
+    Circuit* getActiveCircuit() const;
+    void selectCircuit();
+    void removeActiveCircuit();
+};
+
+
+void displayMenu(const CircuitManager& manager);
 int getUserChoice();
 void handleAddComponent(Circuit& circuit);
 void handleRemoveElement(Circuit& circuit);
 void handleModifyComponent(Circuit& circuit);
-void handleErrorComponentNotFound(const string& componentName) {
-    cout << "Error: Component '" << componentName << "' not found in the circuit." << endl;
-}
-
-void handleErrorNodeNotFound(int node) {
-    cout << "Error: Node '" << node << "' not found in the circuit." << endl;
-}
+void handleErrorComponentNotFound(const string& componentName);
+void handleErrorNodeNotFound(int node);
 void pauseSystem();
 void handleTransientAnalysis(Circuit& circuit);
 void handleMultipleVariablesAnalysis(Circuit& circuit);
@@ -286,72 +327,206 @@ bool safelyReadDouble(double& val, const string& prompt);
 void safelyReadDouble(double& val);
 bool safelyReadInt(int& val, const string& prompt);
 void safelyReadInt(int& val);
+bool safelyReadString(string& val, const string& prompt);
+bool safelyReadComponentParameters(string& inputLine, vector<string>& params);
+void handleSaveCircuit(const Circuit& circuit);
+void handleLoadCircuit(Circuit& circuit);
+void handleNewCircuit(CircuitManager& manager);
+void handleDisplayAndSelectCircuits(CircuitManager& manager);
 
 int main() {
-    Circuit myCircuit;
+    CircuitManager myCircuitManager;
+    myCircuitManager.createNewCircuit(); // Start with one default circuit
+
     bool running = true;
     while (running) {
-        displayMenu();
+        displayMenu(myCircuitManager);
         int choice = getUserChoice();
-        switch (choice) {
-            case 1: handleAddComponent(myCircuit); pauseSystem(); break;
-            case 2: myCircuit.displayCircuit(); pauseSystem(); break;
-            case 3: handleRemoveElement(myCircuit); break;
-            case 4: handleModifyComponent(myCircuit); break;
-            case 5: handleTransientAnalysis(myCircuit); break;
-            case 6: handleMultipleVariablesAnalysis(myCircuit); break;
-            case 7: {
-                bool sub_menu_running = true;
-                while(sub_menu_running) {
-                    cout << "\n--- DC Sweep Voltage Analysis ---" << endl;
-                    double startVoltage, endVoltage, stepVoltage;
-                    if (!safelyReadDouble(startVoltage, "Enter start voltage (or 'b' to Back to Main Menu): ")) {
-                        sub_menu_running = false;
-                        break;
-                    }
-                    if (!safelyReadDouble(endVoltage, "Enter end voltage (or 'b' to Back to Main Menu): ")) {
-                        sub_menu_running = false;
-                        break;
-                    }
-                    if (!safelyReadDouble(stepVoltage, "Enter voltage step (or 'b' to Back to Main Menu): ")) {
-                        sub_menu_running = false;
-                        break;
-                    }
+        Circuit* activeCircuit = myCircuitManager.getActiveCircuit();
 
-                    myCircuit.simulateDCVoltageSweep(startVoltage, endVoltage, stepVoltage);
-                    pauseSystem();
-                }
-                break;
-            }
-            case 8: {
+        if (activeCircuit == nullptr && choice != 1 && choice != 14) {
+            cout << "No active circuit selected. Please create a new circuit (option 1) or select an existing one (option 14)." << endl;
+            pauseSystem();
+            continue;
+        }
+
+        switch (choice) {
+            case 1: handleNewCircuit(myCircuitManager); pauseSystem(); break;
+            case 2: handleDisplayAndSelectCircuits(myCircuitManager); pauseSystem(); break;
+            case 3: activeCircuit->displayCircuit(); pauseSystem(); break;
+            case 4: handleAddComponent(*activeCircuit); pauseSystem(); break;
+            case 5: handleRemoveElement(*activeCircuit); break;
+            case 6: handleModifyComponent(*activeCircuit); break;
+            case 7: handleTransientAnalysis(*activeCircuit); break;
+            case 8: handleMultipleVariablesAnalysis(*activeCircuit); break;
+            case 9: {
                 bool sub_menu_running = true;
                 while(sub_menu_running) {
-                    cout << "\n--- DC Sweep Current Analysis ---" << endl;
-                    double startCurrent, endCurrent, stepCurrent;
-                    if (!safelyReadDouble(startCurrent, "Enter start current (or 'b' to Back to Main Menu): ")) {
+                    cout << "\n--- DC Voltage Sweep Analysis ---" << endl;
+                    double startVoltage, endVoltage, stepVoltage;
+                    if (!safelyReadDouble(startVoltage, "Enter start voltage (or 'b' to go back to main menu): ")) {
                         sub_menu_running = false;
                         break;
                     }
-                    if (!safelyReadDouble(endCurrent, "Enter end current (or 'b' to Back to Main Menu): ")) {
+                    if (!safelyReadDouble(endVoltage, "Enter end voltage (or 'b' to go back to main menu): ")) {
                         sub_menu_running = false;
                         break;
                     }
-                    if (!safelyReadDouble(stepCurrent, "Enter current step (or 'b' to Back to Main Menu): ")) {
+                    if (!safelyReadDouble(stepVoltage, "Enter voltage step (or 'b' to go back to main menu): ")) {
                         sub_menu_running = false;
                         break;
                     }
-                    myCircuit.simulateDCCurrentSweep(startCurrent, endCurrent, stepCurrent);
+                    activeCircuit->simulateDCVoltageSweep(startVoltage, endVoltage, stepVoltage);
                     pauseSystem();
+                    sub_menu_running = false;
                 }
                 break;
             }
-            case 9: handleDisplayNodes(myCircuit); break;
-            case 10: handleRenameNode(myCircuit); break;
-            case 11: running = false; cout << "Exiting..." << endl; break;
+            case 10: {
+                bool sub_menu_running = true;
+                while(sub_menu_running) {
+                    cout << "\n--- DC Current Sweep Analysis ---" << endl;
+                    double startCurrent, endCurrent, stepCurrent;
+                    if (!safelyReadDouble(startCurrent, "Enter start current (or 'b' to go back to main menu): ")) {
+                        sub_menu_running = false;
+                        break;
+                    }
+                    if (!safelyReadDouble(endCurrent, "Enter end current (or 'b' to go back to main menu): ")) {
+                        sub_menu_running = false;
+                        break;
+                    }
+                    if (!safelyReadDouble(stepCurrent, "Enter current step (or 'b' to go back to main menu): ")) {
+                        sub_menu_running = false;
+                        break;
+                    }
+                    activeCircuit->simulateDCCurrentSweep(startCurrent, endCurrent, stepCurrent);
+                    pauseSystem();
+                    sub_menu_running = false;
+                }
+                break;
+            }
+            case 11: handleDisplayNodes(*activeCircuit); break;
+            case 12: handleRenameNode(*activeCircuit); break;
+            case 13: handleSaveCircuit(*activeCircuit); pauseSystem(); break;
+            case 14: handleLoadCircuit(*activeCircuit); pauseSystem(); break;
+            case 15: running = false; cout << "Exiting..." << endl; break;
             default: cout << "Invalid choice. Please try again." << endl; pauseSystem(); break;
         }
     }
     return 0;
+}
+
+void displayMenu(const CircuitManager& manager) {
+    cout << "\n--- Circuit Simulator Menu ---" << endl;
+    Circuit* activeCircuit = manager.getActiveCircuit();
+    if (activeCircuit) {
+        cout << "Active Circuit: " << activeCircuit->getCircuitName() << endl;
+    } else {
+        cout << "No active circuit." << endl;
+    }
+    cout << "1. New Circuit" << endl;
+    cout << "2. Display and Select Circuit" << endl;
+    cout << "3. Display Active Circuit" << endl;
+    cout << "4. Add Element to Active Circuit" << endl;
+    cout << "5. Remove Element from Active Circuit" << endl;
+    cout << "6. Modify Element in Active Circuit" << endl;
+    cout << "7. Perform Transient Analysis on Active Circuit" << endl;
+    cout << "8. Perform Multiple Variables Analysis on Active Circuit" << endl;
+    cout << "9. Perform DC Voltage Sweep Analysis on Active Circuit" << endl;
+    cout << "10. Perform DC Current Sweep Analysis on Active Circuit" << endl;
+    cout << "11. Display Existing Nodes in Active Circuit" << endl;
+    cout << "12. Rename Node in Active Circuit" << endl;
+    cout << "13. Save Active Circuit" << endl;
+    cout << "14. Load Circuit (into current active circuit)" << endl;
+    cout << "15. Exit" << endl;
+    cout << "Enter your choice: ";
+}
+
+int getUserChoice() {
+    int choice;
+    while (!(cin >> choice)) {
+        cout << "Invalid input. Please enter a number: ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    return choice;
+}
+
+void pauseSystem() {
+    cout << "\nPress Enter to continue...";
+    cin.get();
+}
+
+bool safelyReadDouble(double& val, const string& prompt) {
+    string line;
+    while (true) {
+        cout << prompt;
+        getline(cin, line);
+        if (line == "b" || line == "B") return false;
+        stringstream ss(line);
+        if (ss >> val && (ss >> ws).eof()) {
+            return true;
+        }
+        cout << "Invalid input. Please enter a numeric value." << endl;
+    }
+}
+
+void safelyReadDouble(double& val) {
+    string line;
+    while(true){
+        getline(cin, line);
+        stringstream ss(line);
+        if (ss >> val && (ss >> ws).eof()) {
+            return;
+        }
+        cout << "Invalid input. Please enter a numeric value: ";
+    }
+}
+
+bool safelyReadInt(int& val, const string& prompt) {
+    string line;
+    while (true) {
+        cout << prompt;
+        getline(cin, line);
+        if (line == "b" || line == "B") return false;
+        stringstream ss(line);
+        if (ss >> val && (ss >> ws).eof()) {
+            return true;
+        }
+        cout << "Invalid input. Please enter an integer value." << endl;
+    }
+}
+
+void safelyReadInt(int& val) {
+    string line;
+    while(true){
+        getline(cin, line);
+        stringstream ss(line);
+        if (ss >> val && (ss >> ws).eof()) {
+            return;
+        }
+        cout << "Invalid input. Please enter an integer value: ";
+    }
+}
+
+bool safelyReadString(string& val, const string& prompt) {
+    cout << prompt;
+    getline(cin, val);
+    if (val == "b" || val == "B") return false;
+    return true;
+}
+
+bool safelyReadComponentParameters(string& inputLine, vector<string>& params) {
+    getline(cin, inputLine);
+    if (inputLine == "b" || inputLine == "B") return false;
+
+    stringstream ss(inputLine);
+    string token;
+    while (ss >> token) {
+        params.push_back(token);
+    }
+    return true;
 }
 
 void handleDisplayNodes(const Circuit& circuit) {
@@ -359,7 +534,7 @@ void handleDisplayNodes(const Circuit& circuit) {
     while (sub_menu_running) {
         cout << "\n--- Display Existing Nodes ---" << endl;
         circuit.displayNodes();
-        cout << "\nPress 'b' to Back to Main Menu" << endl;
+        cout << "\nPress 'b' to go back to main menu." << endl;
         cout << "Enter your choice: ";
         string choice;
         getline(cin, choice);
@@ -379,32 +554,36 @@ void handleRenameNode(Circuit& circuit) {
         cout << "\n--- Rename Node ---" << endl;
         circuit.displayNodes();
 
-        if (!safelyReadInt(oldNum, "Enter the node number you want to rename (or 'b' to Back to Main Menu): ")) {
+        if (!safelyReadInt(oldNum, "Enter the node number to rename (or 'b' to go back to main menu): ")) {
             sub_menu_running = false;
             break;
         }
-        if (!safelyReadInt(newNum, "Enter the new node number (or 'b' to Back to Main Menu): ")) {
+        if (!safelyReadInt(newNum, "Enter the new node number (or 'b' to go back to main menu): ")) {
             sub_menu_running = false;
             break;
         }
 
         circuit.renameNode(oldNum, newNum);
         pauseSystem();
+        sub_menu_running = false;
     }
 }
 
-void Circuit::addElement(unique_ptr<Component> newComponent) { components.push_back(move(newComponent)); }
+void Circuit::addElement(unique_ptr<Component> newComponent) {
+    components.push_back(move(newComponent));
+}
+
 void Circuit::displayCircuit() const {
     if (components.empty()) {
-        cout << "Circuit is empty." << endl;
+        cout << "Circuit '" << circuitName << "' is empty." << endl;
         return;
     }
 
-    cout << "-------------------- Circuit Status --------------------" << endl;
+    cout << "-------------------- Circuit Status: " << circuitName << " --------------------" << endl;
     if (this->hasGround()) {
-        cout << "Ground Status: Connected." << endl;
+        cout << "Ground status: Connected." << endl;
     } else {
-        cout << ">> WARNING: No ground node (0) found in the circuit! <<" << endl;
+        cout << ">> Warning: No ground node (0) found in the circuit! <<" << endl;
     }
     cout << "--------------------------------------------------------" << endl;
 
@@ -474,7 +653,7 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
                 G(idx2, idx1) -= conductance;
             }
         } else if (auto cap = dynamic_cast<Capacitor*>(comp.get())) {
-            double G_c = 1e-12;
+            double G_c = 1e-12; // Default small conductance to prevent division by zero for 0 capacitance
             if (timeStep > 0 && cap->getCapacitance() > 0) {
                 G_c = cap->getCapacitance() / timeStep;
                 double v1_prev = previousNodeVoltages.count(n1) ? previousNodeVoltages.at(n1) : 0.0;
@@ -490,7 +669,7 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
                 G(idx2, idx1) -= G_c;
             }
         } else if (auto ind = dynamic_cast<Inductor*>(comp.get())) {
-            double G_l = 1e9;
+            double G_l = 1e9; // Default large conductance to approximate short for 0 inductance or timeStep
             if (timeStep > 0 && ind->getInductance() > 0) {
                 G_l = timeStep / ind->getInductance();
                 double i_prev = previousComponentCurrents.count(ind->getName()) ? previousComponentCurrents.at(ind->getName()) : 0.0;
@@ -523,8 +702,9 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
     }
 
     Eigen::VectorXd X;
+    // Check for singularity before solving
     if (G.determinant() == 0) {
-        cout << "Error: Circuit matrix is singular. Cannot solve." << endl;
+        cout << "Error: Circuit matrix is singular. Cannot be solved. Check for floating nodes or invalid connections." << endl;
         nodeVoltages.clear();
         componentCurrents.clear();
         return false;
@@ -567,7 +747,14 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
             } else {
                 double v1 = getNodeVoltage(ind->getNode1());
                 double v2 = getNodeVoltage(ind->getNode2());
-                componentCurrents[ind->getName()] = (v1-v2) * 1e9;
+                // For DC analysis or zero time step, inductor acts as a short circuit.
+                // The current is indeterminate by MNA unless it's in series with a voltage source.
+                // A common simplification is to treat it as a very low resistance.
+                // However, without transient history, it's just a short, so current is determined by the loop.
+                // For now, setting it to 0 or a very large value might cause issues.
+                // This part needs careful consideration for DC analysis of inductors.
+                // For now, a simple approximation to avoid division by zero or large numbers:
+                componentCurrents[ind->getName()] = (v1 - v2) * 1e9; // Approximating as very high resistance
             }
         } else if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
             componentCurrents[cs->getName()] = cs->getValueAtTime(time);
@@ -575,7 +762,6 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
     }
     return true;
 }
-
 
 double Circuit::getNodeVoltage(int node) const {
     if (nodeVoltages.count(node)) {
@@ -607,7 +793,7 @@ void Circuit::simulateTransient(double startTime, double endTime, double timeSte
 
     set<int> all_nodes = getAllNodes();
     int targetNode;
-    if (!safelyReadInt(targetNode, "Enter the node number to monitor (or 'b' to back): ")){
+    if (!safelyReadInt(targetNode, "Enter the node number to observe (or 'b' to go back): ")){
         return;
     }
 
@@ -628,24 +814,19 @@ void Circuit::simulateTransient(double startTime, double endTime, double timeSte
         previousComponentCurrents[comp->getName()] = 0.0;
     }
 
-
+    cout << "\n--- Transient Simulation Results (Observing Node " << targetNode << ") ---" << endl;
     for (double time = startTime; time <= endTime + timeStep / 2; time += timeStep) {
-        cout << "Time: " << scientific << setprecision(4) << time << "s" << endl;
+        cout << "\nTime: " << scientific << setprecision(4) << time << "s" << endl;
         if (!setupAndSolveMNA(time, timeStep)) {
             cout << "Circuit analysis failed at this time step." << endl;
             break;
         }
 
-        cout << "Node " << targetNode << " Voltage: " << scientific << setprecision(4) << getNodeVoltage(targetNode) << " V" << endl;
-        for (const auto& comp : components) {
-            double current = getComponentCurrent(comp->getName());
-            cout << comp->getName() << " (" << comp->getType() << ") Current: "
-                 << scientific << setprecision(4) << current << " A" << endl;
-        }
-        cout << "-----------------" << endl;
+        cout << "  Node " << targetNode << " Voltage: " << scientific << setprecision(4) << getNodeVoltage(targetNode) << " V" << endl;
         previousNodeVoltages = nodeVoltages;
         previousComponentCurrents = componentCurrents;
     }
+    cout << "--- Transient Simulation Finished ---" << endl;
 }
 
 void Circuit::simulateMultipleVariables(double startTime, double endTime, double timeStep) {
@@ -674,37 +855,38 @@ void Circuit::simulateMultipleVariables(double startTime, double endTime, double
         previousComponentCurrents[comp->getName()] = 0.0;
     }
 
-
-    cout << "\n--- Displaying Voltages and Currents at Different Times ---" << endl;
+    cout << "\n--- Transient Simulation Results (All Variables) ---" << endl;
     for (double time = startTime; time <= endTime + timeStep/2; time += timeStep) {
-        cout << "Time: " << scientific << setprecision(4) << time << "s" << endl;
+        cout << "\nTime: " << scientific << setprecision(4) << time << "s" << endl;
         if (!setupAndSolveMNA(time, timeStep)) {
             cout << "Circuit analysis failed at this time step." << endl;
             break;
         }
 
+        cout << "  Node Voltages:" << endl;
         for (auto const& [node, voltage] : nodeVoltages) {
-            cout << "Node " << node << " Voltage: " << scientific << setprecision(4) << voltage << " V" << endl;
+            cout << "    Node " << node << ": " << scientific << setprecision(4) << voltage << " V" << endl;
         }
 
+        cout << "  Component Currents:" << endl;
         for (const auto& comp : components) {
             double current = getComponentCurrent(comp->getName());
-            cout << comp->getName() << " (" << comp->getType() << ") Current: "
+            cout << "    " << comp->getName() << " (" << comp->getType() << "): "
                  << scientific << setprecision(4) << current << " A" << endl;
         }
-        cout << "-----------------" << endl;
         previousNodeVoltages = nodeVoltages;
         previousComponentCurrents = componentCurrents;
     }
+    cout << "--- Transient Simulation Finished ---" << endl;
 }
 
 void Circuit::simulateDCVoltageSweep(double startVoltage, double endVoltage, double stepVoltage) {
     if (stepVoltage == 0) {
-        cout << "Error: Voltage step cannot be zero for a sweep." << endl;
+        cout << "Error: Voltage step for sweep cannot be zero." << endl;
         return;
     }
     if ((startVoltage < endVoltage && stepVoltage < 0) || (startVoltage > endVoltage && stepVoltage > 0)) {
-        cout << "Error: Step direction is incorrect for the given start and end voltages." << endl;
+        cout << "Error: Incorrect step direction for given start and end voltages." << endl;
         return;
     }
     if (!hasGround()) {
@@ -723,42 +905,44 @@ void Circuit::simulateDCVoltageSweep(double startVoltage, double endVoltage, dou
     }
 
     if (!sweepSource) {
-        cout << "No DC Voltage Source found in the circuit to perform a DC sweep." << endl;
+        cout << "No DC voltage source found in the circuit to perform DC sweep. Please add one." << endl;
         return;
     }
 
     double originalVoltage = sweepSource->getValueAtTime(0);
     double currentVoltage = startVoltage;
+
+    cout << "\n--- DC Voltage Sweep Results (Sweeping " << sweepSource->getName() << ") ---" << endl;
     while ((stepVoltage > 0 && currentVoltage <= endVoltage + stepVoltage/2) || (stepVoltage < 0 && currentVoltage >= endVoltage + stepVoltage/2)) {
         sweepSource->setDCOffsetValue(currentVoltage);
-        cout << "Voltage Sweep: " << scientific << setprecision(4) << currentVoltage << "V" << endl;
+        cout << "\nSweep Voltage (" << sweepSource->getName() << "): " << scientific << setprecision(4) << currentVoltage << "V" << endl;
         if (!setupAndSolveMNA(0, 0.0)) {
-            cout << "Circuit analysis failed for this voltage step." << endl;
+            cout << "Circuit analysis failed for this voltage step. Aborting sweep." << endl;
             break;
         }
-
+        cout << "  Node Voltages:" << endl;
         for (auto const& [node, voltage] : nodeVoltages) {
-            cout << "Node " << node << " Voltage: " << scientific << setprecision(4) << voltage << " V" << endl;
+            cout << "    Node " << node << ": " << scientific << setprecision(4) << voltage << " V" << endl;
         }
-
+        cout << "  Component Currents:" << endl;
         for (const auto& comp : components) {
             double current = getComponentCurrent(comp->getName());
-            cout << comp->getName() << " (" << comp->getType() << ") Current: "
+            cout << "    " << comp->getName() << " (" << comp->getType() << "): "
                  << scientific << setprecision(4) << current << " A" << endl;
         }
         currentVoltage += stepVoltage;
-        cout << "-----------------" << endl;
     }
     sweepSource->setDCOffsetValue(originalVoltage);
+    cout << "--- DC Voltage Sweep Finished ---" << endl;
 }
 
 void Circuit::simulateDCCurrentSweep(double startCurrent, double endCurrent, double stepCurrent) {
     if (stepCurrent == 0) {
-        cout << "Error: Current step cannot be zero for a sweep." << endl;
+        cout << "Error: Current step for sweep cannot be zero." << endl;
         return;
     }
     if ((startCurrent < endCurrent && stepCurrent < 0) || (startCurrent > endCurrent && stepCurrent > 0)) {
-        cout << "Error: Step direction is incorrect for the given start and end currents." << endl;
+        cout << "Error: Incorrect step direction for given start and end currents." << endl;
         return;
     }
     if (!hasGround()) {
@@ -777,33 +961,35 @@ void Circuit::simulateDCCurrentSweep(double startCurrent, double endCurrent, dou
     }
 
     if (!sweepSource) {
-        cout << "No DC Current Source found in the circuit to perform a DC sweep." << endl;
+        cout << "No DC current source found in the circuit to perform DC sweep. Please add one." << endl;
         return;
     }
 
     double originalCurrent = sweepSource->getValueAtTime(0);
     double currentSweepValue = startCurrent;
+
+    cout << "\n--- DC Current Sweep Results (Sweeping " << sweepSource->getName() << ") ---" << endl;
     while ((stepCurrent > 0 && currentSweepValue <= endCurrent + stepCurrent / 2) || (stepCurrent < 0 && currentSweepValue >= endCurrent + stepCurrent / 2)) {
         sweepSource->setDCOffsetValue(currentSweepValue);
-        cout << "Current Sweep: " << scientific << setprecision(4) << currentSweepValue << " A" << endl;
+        cout << "\nSweep Current (" << sweepSource->getName() << "): " << scientific << setprecision(4) << currentSweepValue << " A" << endl;
         if (!setupAndSolveMNA(0, 0.0)) {
-            cout << "Circuit analysis failed for this current step." << endl;
+            cout << "Circuit analysis failed for this current step. Aborting sweep." << endl;
             break;
         }
-
+        cout << "  Node Voltages:" << endl;
         for (auto const& [node, voltage] : nodeVoltages) {
-            cout << "Node " << node << " Voltage: " << scientific << setprecision(4) << voltage << " V" << endl;
+            cout << "    Node " << node << ": " << scientific << setprecision(4) << voltage << " V" << endl;
         }
-
+        cout << "  Component Currents:" << endl;
         for (const auto& comp : components) {
             double current = getComponentCurrent(comp->getName());
-            cout << comp->getName() << " (" << comp->getType() << ") Current: "
+            cout << "    " << comp->getName() << " (" << comp->getType() << "): "
                  << scientific << setprecision(4) << current << " A" << endl;
         }
         currentSweepValue += stepCurrent;
-        cout << "-----------------" << endl;
     }
     sweepSource->setDCOffsetValue(originalCurrent);
+    cout << "--- DC Current Sweep Finished ---" << endl;
 }
 
 bool Circuit::hasGround() const {
@@ -814,22 +1000,20 @@ bool Circuit::hasGround() const {
     }
     return false;
 }
+
 bool Circuit::renameNode(int oldNodeNum, int newNodeNum) {
     auto allNodes = getAllNodes();
     if (allNodes.find(oldNodeNum) == allNodes.end()) {
         cout << "Error: Node " << oldNodeNum << " does not exist in the circuit." << endl;
         return false;
     }
-
     if (oldNodeNum != newNodeNum && allNodes.count(newNodeNum) > 0) {
-        cout << "Error: Node " << newNodeNum << " already exists. Cannot merge nodes." << endl;
+        cout << "Error: Node " << newNodeNum << " already exists. Merging nodes is not supported directly." << endl;
         return false;
     }
-
     for (auto& comp : components) {
         int n1 = comp->getNode1();
         int n2 = comp->getNode2();
-
         bool changed = false;
         if (n1 == oldNodeNum) {
             n1 = newNodeNum;
@@ -839,26 +1023,25 @@ bool Circuit::renameNode(int oldNodeNum, int newNodeNum) {
             n2 = newNodeNum;
             changed = true;
         }
-
         if (changed) {
             comp->setNodes(n1, n2);
         }
     }
-
-    cout << "Success: Node " << oldNodeNum << " has been renamed to " << newNodeNum << " throughout the circuit." << endl;
+    cout << "Success: Node " << oldNodeNum << " renamed to " << newNodeNum << " throughout the circuit." << endl;
     return true;
 }
+
 void Circuit::displayNodes() const {
     if (components.empty()) {
         cout << "Circuit is empty, no nodes to display." << endl;
         return;
     }
-
     auto unique_nodes = getAllNodes();
-    cout << "--- Existing Nodes in Circuit ---" << endl;
+    cout << "--- Existing Nodes in Circuit '" << circuitName << "' ---" << endl;
     if (unique_nodes.empty()) {
         cout << "No nodes found." << endl;
     } else {
+        cout << "Nodes: ";
         for (int node : unique_nodes) {
             cout << node << " ";
         }
@@ -879,7 +1062,9 @@ bool Circuit::removeElement(const string& componentName) {
 
 Component* Circuit::findElement(const string& componentName) {
     for (const auto& comp : components) {
-        if (comp->getName() == componentName) { return comp.get(); }
+        if (comp->getName() == componentName) {
+            return comp.get();
+        }
     }
     return nullptr;
 }
@@ -888,21 +1073,19 @@ void handleTransientAnalysis(Circuit& circuit) {
     bool sub_menu_running = true;
     while (sub_menu_running) {
         double startTime, endTime, timeStep;
-        cout << "\n--- Transient Analysis ---" << endl;
-
-        if (!safelyReadDouble(startTime, "Enter start time (or 'b' to Back to Main Menu): ")) {
+        cout << "\n--- Transient Analysis for " << circuit.getCircuitName() << " ---" << endl;
+        if (!safelyReadDouble(startTime, "Enter start time (s) (or 'b' to go back to main menu): ")) {
             sub_menu_running = false;
             break;
         }
-        if (!safelyReadDouble(endTime, "Enter end time (or 'b' to Back to Main Menu): ")) {
+        if (!safelyReadDouble(endTime, "Enter end time (s) (or 'b' to go back to main menu): ")) {
             sub_menu_running = false;
             break;
         }
-        if (!safelyReadDouble(timeStep, "Enter time step (or 'b' to Back to Main Menu): ")) {
+        if (!safelyReadDouble(timeStep, "Enter time step (s) (or 'b' to go back to main menu): ")) {
             sub_menu_running = false;
             break;
         }
-
         circuit.simulateTransient(startTime, endTime, timeStep);
         pauseSystem();
         sub_menu_running = false;
@@ -913,21 +1096,19 @@ void handleMultipleVariablesAnalysis(Circuit& circuit) {
     bool sub_menu_running = true;
     while (sub_menu_running) {
         double startTime, endTime, timeStep;
-        cout << "\n--- Multiple Variables Analysis ---" << endl;
-
-        if (!safelyReadDouble(startTime, "Enter start time (or 'b' to Back to Main Menu): ")) {
+        cout << "\n--- Multiple Variables Analysis for " << circuit.getCircuitName() << " ---" << endl;
+        if (!safelyReadDouble(startTime, "Enter start time (s) (or 'b' to go back to main menu): ")) {
             sub_menu_running = false;
             break;
         }
-        if (!safelyReadDouble(endTime, "Enter end time (or 'b' to Back to Main Menu): ")) {
+        if (!safelyReadDouble(endTime, "Enter end time (s) (or 'b' to go back to main menu): ")) {
             sub_menu_running = false;
             break;
         }
-        if (!safelyReadDouble(timeStep, "Enter time step (or 'b' to Back to Main Menu): ")) {
+        if (!safelyReadDouble(timeStep, "Enter time step (s) (or 'b' to go back to main menu): ")) {
             sub_menu_running = false;
             break;
         }
-
         circuit.simulateMultipleVariables(startTime, endTime, timeStep);
         pauseSystem();
         sub_menu_running = false;
@@ -937,399 +1118,576 @@ void handleMultipleVariablesAnalysis(Circuit& circuit) {
 void handleAddComponent(Circuit& circuit) {
     string name;
     int type_choice;
-    cout << "\n--- Add New Component ---" << endl;
-    cout << "Select component type:" << endl;
+    string inputLine;
+    vector<string> params;
+
+    cout << "\n--- Add New Element to " << circuit.getCircuitName() << " ---" << endl;
+    cout << "Select element type:" << endl;
     cout << "1. Resistor" << endl;
     cout << "2. Capacitor" << endl;
     cout << "3. Inductor" << endl;
     cout << "4. Voltage Source" << endl;
     cout << "5. Current Source" << endl;
-    cout << "0. Back to Main Menu" << endl;
-    cout << "Enter your choice: ";
-    safelyReadInt(type_choice);
+    cout << "Enter your choice (or 'b' to go back to main menu): ";
 
-    if (type_choice == 0) {
+    string choice_str;
+    getline(cin, choice_str);
+    if (choice_str == "b" || choice_str == "B") return;
+
+    stringstream ss_choice(choice_str);
+    if (!(ss_choice >> type_choice)) {
+        cout << "Invalid input. Please enter a number." << endl;
         return;
     }
 
-    ComponentType type_enum = intToComponentType(type_choice);
-    if (type_enum == ComponentType::UNKNOWN) {
-        cout << "Error: Invalid component type choice. Please try again." << endl;
+    ComponentType type = intToComponentType(type_choice);
+
+    cout << "Enter element name: ";
+    getline(cin, name);
+    if (name == "b" || name == "B") return;
+    if (circuit.findElement(name) != nullptr) {
+        cout << "Error: Element with this name already exists. Please choose a unique name." << endl;
         return;
     }
 
-    string line;
-    int n1, n2;
-    unique_ptr<Component> newComponent = nullptr;
+    switch (type) {
+        case ComponentType::RESISTOR: {
+            double resistance;
+            cout << "Enter resistance value (e.g., 100, 1k, 2.2meg): ";
+            string val_str;
+            getline(cin, val_str);
+            if (val_str == "b" || val_str == "B") return;
+            resistance = parseEngineeringValue(val_str);
+            if (resistance <= 0) { cout << "Invalid resistance value. Must be positive." << endl; return; }
 
-    switch (type_enum) {
-        case ComponentType::RESISTOR:
-        case ComponentType::CAPACITOR:
+            int n1, n2;
+            if (!safelyReadInt(n1, "Enter Node 1: ")) return;
+            if (!safelyReadInt(n2, "Enter Node 2: ")) return;
+            circuit.addElement(make_unique<Resistor>(name, resistance, n1, n2));
+            cout << "Resistor '" << name << "' added." << endl;
+            break;
+        }
+        case ComponentType::CAPACITOR: {
+            double capacitance;
+            cout << "Enter capacitance value (e.g., 10u, 47n, 100p): ";
+            string val_str;
+            getline(cin, val_str);
+            if (val_str == "b" || val_str == "B") return;
+            capacitance = parseEngineeringValue(val_str);
+            if (capacitance <= 0) { cout << "Invalid capacitance value. Must be positive." << endl; return; }
+
+            int n1, n2;
+            if (!safelyReadInt(n1, "Enter Node 1: ")) return;
+            if (!safelyReadInt(n2, "Enter Node 2: ")) return;
+            circuit.addElement(make_unique<Capacitor>(name, capacitance, n1, n2));
+            cout << "Capacitor '" << name << "' added." << endl;
+            break;
+        }
         case ComponentType::INDUCTOR: {
-            cout << "Enter details in format: <name> <node1> <node2> <value> (e.g., R1 1 0 1k)" << endl;
-            getline(cin, line);
-            stringstream ss(line);
-            string value_str;
-            ss >> name >> n1 >> n2 >> value_str;
-            if (circuit.findElement(name) != nullptr) {
-                cout << "Error: A component with name '" << name << "' already exists." << endl;
-                return;
-            }
-            double value = parseEngineeringValue(value_str);
-            if (type_enum == ComponentType::RESISTOR)
-                newComponent = make_unique<Resistor>(name, value, n1, n2);
-            else if (type_enum == ComponentType::CAPACITOR)
-                newComponent = make_unique<Capacitor>(name, value, n1, n2);
-            else if (type_enum == ComponentType::INDUCTOR)
-                newComponent = make_unique<Inductor>(name, value, n1, n2);
+            double inductance;
+            cout << "Enter inductance value (e.g., 10m, 1u, 500n): ";
+            string val_str;
+            getline(cin, val_str);
+            if (val_str == "b" || val_str == "B") return;
+            inductance = parseEngineeringValue(val_str);
+            if (inductance <= 0) { cout << "Invalid inductance value. Must be positive." << endl; return; }
+
+            int n1, n2;
+            if (!safelyReadInt(n1, "Enter Node 1: ")) return;
+            if (!safelyReadInt(n2, "Enter Node 2: ")) return;
+            circuit.addElement(make_unique<Inductor>(name, inductance, n1, n2));
+            cout << "Inductor '" << name << "' added." << endl;
             break;
         }
         case ComponentType::VOLTAGE_SOURCE: {
-            string waveform_str;
-            cout << "Enter waveform type for Voltage Source (DC or SINE): ";
-            getline(cin, waveform_str);
-            transform(waveform_str.begin(), waveform_str.end(), waveform_str.begin(), ::toupper);
-            if (waveform_str == "DC") {
-                cout << "Enter details in format: <name> <node1> <node2> <value> (e.g., V1 1 0 9V)" << endl;
-                getline(cin, line);
-                stringstream ss(line);
-                string value_str;
-                ss >> name >> n1 >> n2 >> value_str;
-                if (circuit.findElement(name) != nullptr) {
-                    cout << "Error: A component with name '" << name << "' already exists." << endl; return;}
-                newComponent = make_unique<VoltageSource>(name, parseEngineeringValue(value_str), n1, n2);
-            } else if (waveform_str == "SINE") {
-                cout << "Enter details in format: <name> <node1> <node2> <offset> <amplitude> <frequency>" << endl;
-                getline(cin, line);
-                stringstream ss(line);
-                double offset, amp, freq;
-                ss >> name >> n1 >> n2 >> offset >> amp >> freq;
-                if (circuit.findElement(name) != nullptr) {
-                    cout << "Error: A component with name '" << name << "' already exists." << endl; return;}
-                newComponent = make_unique<VoltageSource>(name, offset, amp, freq, n1, n2);
+            cout << "Select voltage source waveform type (1 for DC, 2 for SINE): ";
+            string waveform_choice_str;
+            getline(cin, waveform_choice_str);
+            if (waveform_choice_str == "b" || waveform_choice_str == "B") return;
+            stringstream ss_waveform(waveform_choice_str);
+            int waveform_choice;
+            if (!(ss_waveform >> waveform_choice)) {
+                cout << "Invalid input. Please enter 1 or 2." << endl;
+                return;
+            }
+            if (waveform_choice == 1) {
+                double dc_val;
+                if (!safelyReadDouble(dc_val, "Enter DC voltage value (V): ")) return;
+                int n1, n2;
+                if (!safelyReadInt(n1, "Enter Node 1: ")) return;
+                if (!safelyReadInt(n2, "Enter Node 2: ")) return;
+                circuit.addElement(make_unique<VoltageSource>(name, dc_val, n1, n2));
+                cout << "DC Voltage Source '" << name << "' added." << endl;
+            } else if (waveform_choice == 2) {
+                double offset, amplitude, frequency;
+                if (!safelyReadDouble(offset, "Enter Offset voltage (V): ")) return;
+                if (!safelyReadDouble(amplitude, "Enter Amplitude (V): ")) return;
+                if (!safelyReadDouble(frequency, "Enter Frequency (Hz): ")) return;
+                if (frequency < 0) { cout << "Frequency cannot be negative." << endl; return; }
+                int n1, n2;
+                if (!safelyReadInt(n1, "Enter Node 1: ")) return;
+                if (!safelyReadInt(n2, "Enter Node 2: ")) return;
+                circuit.addElement(make_unique<VoltageSource>(name, offset, amplitude, frequency, n1, n2));
+                cout << "Sine Voltage Source '" << name << "' added." << endl;
             } else {
-                cout << "Error: Invalid waveform type for Voltage Source. Not added." << endl;
+                cout << "Invalid waveform type selected. Please choose 1 or 2." << endl;
             }
             break;
         }
         case ComponentType::CURRENT_SOURCE: {
-            string waveform_str;
-            cout << "Enter waveform type for Current Source (DC or SINE): ";
-            getline(cin, waveform_str);
-            transform(waveform_str.begin(), waveform_str.end(), waveform_str.begin(), ::toupper);
-            if (waveform_str == "DC") {
-                cout << "Enter details in format: <name> <node1> <node2> <value> (e.g., I1 1 0 500m)" << endl;
-                getline(cin, line);
-                stringstream ss(line);
-                string value_str;
-                ss >> name >> n1 >> n2 >> value_str;
-                if (circuit.findElement(name) != nullptr) {
-                    cout << "Error: A component with name '" << name << "' already exists." << endl; return;}
-                newComponent = make_unique<CurrentSource>(name, parseEngineeringValue(value_str), n1, n2);
-            } else if (waveform_str == "SINE") {
-                cout << "Enter details in format: <name> <node1> <node2> <offset> <amplitude> <frequency>" << endl;
-                getline(cin, line);
-                stringstream ss(line);
-                double offset, amp, freq;
-                ss >> name >> n1 >> n2 >> offset >> amp >> freq;
-                if (circuit.findElement(name) != nullptr) {
-                    cout << "Error: A component with name '" << name << "' already exists." << endl; return;}
-                newComponent = make_unique<CurrentSource>(name, offset, amp, freq, n1, n2);
+            cout << "Select current source waveform type (1 for DC, 2 for SINE): ";
+            string waveform_choice_str;
+            getline(cin, waveform_choice_str);
+            if (waveform_choice_str == "b" || waveform_choice_str == "B") return;
+            stringstream ss_waveform(waveform_choice_str);
+            int waveform_choice;
+            if (!(ss_waveform >> waveform_choice)) {
+                cout << "Invalid input. Please enter 1 or 2." << endl;
+                return;
+            }
+            if (waveform_choice == 1) {
+                double dc_val;
+                if (!safelyReadDouble(dc_val, "Enter DC current value (A): ")) return;
+                int n1, n2;
+                if (!safelyReadInt(n1, "Enter Node 1: ")) return;
+                if (!safelyReadInt(n2, "Enter Node 2: ")) return;
+                circuit.addElement(make_unique<CurrentSource>(name, dc_val, n1, n2));
+                cout << "DC Current Source '" << name << "' added." << endl;
+            } else if (waveform_choice == 2) {
+                double offset, amplitude, frequency;
+                if (!safelyReadDouble(offset, "Enter Offset current (A): ")) return;
+                if (!safelyReadDouble(amplitude, "Enter Amplitude (A): ")) return;
+                if (!safelyReadDouble(frequency, "Enter Frequency (Hz): ")) return;
+                if (frequency < 0) { cout << "Frequency cannot be negative." << endl; return; }
+                int n1, n2;
+                if (!safelyReadInt(n1, "Enter Node 1: ")) return;
+                if (!safelyReadInt(n2, "Enter Node 2: ")) return;
+                circuit.addElement(make_unique<CurrentSource>(name, offset, amplitude, frequency, n1, n2));
+                cout << "Sine Current Source '" << name << "' added." << endl;
             } else {
-                cout << "Error: Invalid waveform type for Current Source. Not added." << endl;
+                cout << "Invalid waveform type selected. Please choose 1 or 2." << endl;
             }
             break;
         }
-        case ComponentType::UNKNOWN:
+        default:
+            cout << "Invalid element type selection." << endl;
             break;
-    }
-
-    if (newComponent != nullptr) {
-        cout << "Info: Component '" << name << "' added successfully." << endl;
-        circuit.addElement(move(newComponent));
-    } else {
-        cout << "Error: Component not added due to invalid input or type." << endl;
     }
 }
 
 void handleRemoveElement(Circuit& circuit) {
-    bool sub_menu_running = true;
-    while (sub_menu_running) {
-        string name;
-        cout << "\n--- Remove Component ---" << endl;
-        circuit.displayCircuit();
-        cout << "Enter the name of the component to remove (or type 'b' to Back to Main Menu): ";
-        getline(cin, name);
+    cout << "\n--- Remove Element from " << circuit.getCircuitName() << " ---" << endl;
+    cout << "Enter the name of the component to remove (or 'b' to go back to main menu): ";
+    string name_to_remove;
+    getline(cin, name_to_remove);
+    if (name_to_remove == "b" || name_to_remove == "B") return;
 
-        if (name == "b" || name == "B") {
-            sub_menu_running = false;
-            break;
-        }
-
-        if (circuit.removeElement(name)) {
-            cout << "Success: Component '" << name << "' has been removed." << endl;
-        } else {
-            handleErrorComponentNotFound(name);
-        }
-        pauseSystem();
+    if (circuit.removeElement(name_to_remove)) {
+        cout << "Element '" << name_to_remove << "' successfully removed." << endl;
+    } else {
+        handleErrorComponentNotFound(name_to_remove);
     }
+    pauseSystem();
 }
 
 void handleModifyComponent(Circuit& circuit) {
-    bool sub_menu_running = true;
-    while (sub_menu_running) {
-        string name;
-        cout << "\n--- Modify Component ---" << endl;
-        circuit.displayCircuit();
-        cout << "Enter the name of the component to modify (or type 'b' to Back to Main Menu): ";
-        getline(cin, name);
+    cout << "\n--- Modify Element in " << circuit.getCircuitName() << " ---" << endl;
+    cout << "Enter the name of the component to modify (or 'b' to go back to main menu): ";
+    string name_to_modify;
+    getline(cin, name_to_modify);
+    if (name_to_modify == "b" || name_to_modify == "B") return;
 
-        if (name == "b" || name == "B") {
-            sub_menu_running = false;
-            break;
+    Component* comp = circuit.findElement(name_to_modify);
+    if (!comp) {
+        handleErrorComponentNotFound(name_to_modify);
+        pauseSystem();
+        return;
+    }
+
+    cout << "Element found: " << comp->getName() << " (" << comp->getType() << ")" << endl;
+    cout << "What would you like to modify?" << endl;
+    cout << "1. Nodes" << endl;
+
+    if (comp->getType() == "Resistor") {
+        cout << "2. Resistance" << endl;
+    } else if (comp->getType() == "Capacitor") {
+        cout << "2. Capacitance" << endl;
+    } else if (comp->getType() == "Inductor") {
+        cout << "2. Inductance" << endl;
+    } else if (comp->getType() == "Voltage Source") {
+        cout << "2. DC Value/Offset" << endl;
+        if (dynamic_cast<VoltageSource*>(comp)->getWaveformType() == VoltageSource::Waveform::SINE) {
+            cout << "3. Amplitude" << endl;
+            cout << "4. Frequency" << endl;
         }
+    } else if (comp->getType() == "Current Source") {
+        cout << "2. DC Value/Offset" << endl;
+        if (dynamic_cast<CurrentSource*>(comp)->getWaveformType() == CurrentSource::Waveform::SINE) {
+            cout << "3. Amplitude" << endl;
+            cout << "4. Frequency" << endl;
+        }
+    }
+    cout << "Enter your choice: ";
+    string modify_choice_str;
+    getline(cin, modify_choice_str);
+    stringstream ss_modify_choice(modify_choice_str);
+    int modify_choice;
+    if (!(ss_modify_choice >> modify_choice)) {
+        cout << "Invalid input. Please enter a number." << endl;
+        pauseSystem();
+        return;
+    }
 
-        Component* comp = circuit.findElement(name);
-        if (comp == nullptr) {
-            handleErrorComponentNotFound(name);
+    if (modify_choice == 1) {
+        int n1, n2;
+        cout << "Enter new nodes in format 'Node1 Node2' (e.g., 1 2): ";
+        string line;
+        getline(cin, line);
+        if (line == "b" || line == "B") return;
+        stringstream ss(line);
+        if (!(ss >> n1 >> n2)) {
+            cout << "Invalid input. Please enter two numbers for nodes." << endl;
             pauseSystem();
+            return;
+        }
+        comp->setNodes(n1, n2);
+        cout << "Nodes successfully updated." << endl;
+    } else if (modify_choice == 2) {
+        if (auto res = dynamic_cast<Resistor*>(comp)) {
+            double new_res;
+            cout << "Enter new resistance: ";
+            safelyReadDouble(new_res);
+            res->setResistance(new_res);
+            cout << "Resistance successfully updated." << endl;
+        } else if (auto cap = dynamic_cast<Capacitor*>(comp)) {
+            double new_cap;
+            string cap_str;
+            cout << "Enter new capacitance (e.g., 100n for 100 nanofarads, 10u for 10 microfarads): ";
+            getline(cin, cap_str);
+            if (cap_str == "b" || cap_str == "B") return;
+            new_cap = parseEngineeringValue(cap_str);
+            if (new_cap <= 0 && (cap_str != "0" && cap_str != "0.0")) {
+                cout << "Invalid capacitance value. Please try again." << endl;
+                pauseSystem();
+                return;
+            }
+            cap->setCapacitance(new_cap);
+            cout << "Capacitance successfully updated." << endl;
+        } else if (auto ind = dynamic_cast<Inductor*>(comp)) {
+            double new_ind;
+            string ind_str;
+            cout << "Enter new inductance (e.g., 10m for 10 millihenries, 1u for 1 microhenry): ";
+            getline(cin, ind_str);
+            if (ind_str == "b" || ind_str == "B") return;
+            new_ind = parseEngineeringValue(ind_str);
+            if (new_ind <= 0 && (ind_str != "0" && ind_str != "0.0")) {
+                cout << "Invalid inductance value. Please try again." << endl;
+                pauseSystem();
+                return;
+            }
+            ind->setInductance(new_ind);
+            cout << "Inductance successfully updated." << endl;
+        } else if (auto vs = dynamic_cast<VoltageSource*>(comp)) {
+            double new_val;
+            cout << "Enter new DC value/offset: ";
+            safelyReadDouble(new_val);
+            vs->setDCOffsetValue(new_val);
+            cout << "DC value/offset successfully updated." << endl;
+        } else if (auto cs = dynamic_cast<CurrentSource*>(comp)) {
+            double new_val;
+            cout << "Enter new DC value/offset: ";
+            safelyReadDouble(new_val);
+            cs->setDCOffsetValue(new_val);
+            cout << "DC value/offset successfully updated." << endl;
+        } else {
+            cout << "Invalid modification choice for this component type." << endl;
+        }
+    } else if (modify_choice == 3) {
+        if (auto vs = dynamic_cast<VoltageSource*>(comp)) {
+            if (vs->getWaveformType() == VoltageSource::Waveform::SINE) {
+                double new_amp;
+                cout << "Enter new amplitude: ";
+                safelyReadDouble(new_amp);
+                vs->setAmplitude(new_amp);
+                cout << "Amplitude successfully updated." << endl;
+            } else {
+                cout << "Invalid modification choice for this component type." << endl;
+            }
+        } else if (auto cs = dynamic_cast<CurrentSource*>(comp)) {
+            if (cs->getWaveformType() == CurrentSource::Waveform::SINE) {
+                double new_amp;
+                cout << "Enter new amplitude: ";
+                safelyReadDouble(new_amp);
+                cs->setAmplitude(new_amp);
+                cout << "Amplitude successfully updated." << endl;
+            } else {
+                cout << "Invalid modification choice for this component type." << endl;
+            }
+        } else {
+            cout << "Invalid modification choice for this component type." << endl;
+        }
+    } else if (modify_choice == 4) {
+        if (auto vs = dynamic_cast<VoltageSource*>(comp)) {
+            if (vs->getWaveformType() == VoltageSource::Waveform::SINE) {
+                double new_freq;
+                cout << "Enter new frequency: ";
+                safelyReadDouble(new_freq);
+                vs->setFrequency(new_freq);
+                cout << "Frequency successfully updated." << endl;
+            } else {
+                cout << "Invalid modification choice for this component type." << endl;
+            }
+        } else if (auto cs = dynamic_cast<CurrentSource*>(comp)) {
+            if (cs->getWaveformType() == CurrentSource::Waveform::SINE) {
+                double new_freq;
+                cout << "Enter new frequency: ";
+                safelyReadDouble(new_freq);
+                cs->setFrequency(new_freq);
+                cout << "Frequency successfully updated." << endl;
+            } else {
+                cout << "Invalid modification choice for this component type." << endl;
+            }
+        } else {
+            cout << "Invalid modification choice for this component type." << endl;
+        }
+    } else {
+        cout << "Invalid modification choice." << endl;
+    }
+    pauseSystem();
+}
+
+void handleErrorComponentNotFound(const string& componentName) {
+    cout << "Error: Component '" << componentName << "' not found in the circuit." << endl;
+}
+
+void handleErrorNodeNotFound(int node) {
+    cout << "Error: Node '" << node << "' not found in the circuit." << endl;
+}
+
+void Circuit::saveCircuit(const string& filename) const {
+    ofstream outFile(filename);
+    if (!outFile.is_open()) {
+        cout << "Error: Could not open file for saving: " << filename << endl;
+        return;
+    }
+
+    outFile << "CIRCUIT_NAME " << circuitName << endl; // Save circuit name
+    for (const auto& comp : components) {
+        outFile << comp->serialize() << endl;
+    }
+
+    outFile.close();
+    cout << "Circuit saved to '" << filename << "'." << endl;
+}
+
+bool Circuit::loadCircuit(const string& filename) {
+    ifstream inFile(filename);
+    if (!inFile.is_open()) {
+        cout << "Error: Could not open file for loading: " << filename << endl;
+        return false;
+    }
+
+    components.clear();
+    string line;
+    string loadedCircuitName = "Unnamed Circuit"; // Default name
+    if (getline(inFile, line)) {
+        stringstream ss_name(line);
+        string keyword;
+        ss_name >> keyword;
+        if (keyword == "CIRCUIT_NAME") {
+            getline(ss_name, loadedCircuitName); // Read the rest of the line as circuit name
+            if (loadedCircuitName.rfind(' ') == 0) loadedCircuitName.erase(0, 1); // Remove leading space if any
+        } else {
+            // If the first line is not CIRCUIT_NAME, it's probably an old format or corrupted.
+            // Rewind and process it as a component line.
+            inFile.seekg(0);
+        }
+    }
+    setCircuitName(loadedCircuitName);
+
+
+    while (getline(inFile, line)) {
+        stringstream ss(line);
+        string type_str;
+        ss >> type_str;
+
+        string name;
+        if (!(ss >> name)) {
+            cout << "Error loading element: Invalid name for type " << type_str << "." << endl;
             continue;
         }
 
-        cout << "Component found. What do you want to modify?" << endl;
-        int choice;
-
-        if (Resistor* res = dynamic_cast<Resistor*>(comp)) {
-            cout << "1. Resistance Value\n2. Nodes\n0. Back to Component Selection" << endl;
-            cout << "Enter your choice: ";
-            safelyReadInt(choice);
-            if (choice == 0) {
-                pauseSystem();
+        int n1, n2;
+        if (type_str == "Resistor") {
+            double resistance;
+            if (!(ss >> resistance >> n1 >> n2)) {
+                cout << "Error loading Resistor: Invalid format for '" << name << "'." << endl;
                 continue;
             }
-            if (choice == 1) {
-                string value_str;
-                cout << "Enter new resistance: ";
-                getline(cin, value_str);
-                res->setResistance(parseEngineeringValue(value_str));
-                cout << "Success: Resistance updated." << endl;
-            } else if (choice == 2) {
-                int n1, n2;
-                cout << "Enter new node 1: "; safelyReadInt(n1);
-                cout << "Enter new node 2: "; safelyReadInt(n2);
-                res->setNodes(n1, n2);
-                cout << "Success: Nodes updated." << endl;
-            } else {
-                cout << "Invalid choice." << endl;
-            }
-        } else if (Capacitor* cap = dynamic_cast<Capacitor*>(comp)) {
-            cout << "1. Capacitance Value\n2. Nodes\n0. Back to Component Selection" << endl;
-            cout << "Enter your choice: ";
-            safelyReadInt(choice);
-            if (choice == 0) {
-                pauseSystem();
+            addElement(make_unique<Resistor>(name, resistance, n1, n2));
+        } else if (type_str == "Capacitor") {
+            double capacitance;
+            if (!(ss >> capacitance >> n1 >> n2)) {
+                cout << "Error loading Capacitor: Invalid format for '" << name << "'." << endl;
                 continue;
             }
-            if (choice == 1) {
-                string value_str;
-                cout << "Enter new capacitance: ";
-                getline(cin, value_str);
-                cap->setCapacitance(parseEngineeringValue(value_str));
-                cout << "Success: Capacitance updated." << endl;
-            } else if (choice == 2) {
-                int n1, n2;
-                cout << "Enter new node 1: "; safelyReadInt(n1);
-                cout << "Enter new node 2: "; safelyReadInt(n2);
-                cap->setNodes(n1, n2);
-                cout << "Success: Nodes updated." << endl;
-            } else {
-                cout << "Invalid choice." << endl;
-            }
-        } else if (Inductor* ind = dynamic_cast<Inductor*>(comp)) {
-            cout << "1. Inductance Value\n2. Nodes\n0. Back to Component Selection" << endl;
-            cout << "Enter your choice: ";
-            safelyReadInt(choice);
-            if (choice == 0) {
-                pauseSystem();
+            addElement(make_unique<Capacitor>(name, capacitance, n1, n2));
+        } else if (type_str == "Inductor") {
+            double inductance;
+            if (!(ss >> inductance >> n1 >> n2)) {
+                cout << "Error loading Inductor: Invalid format for '" << name << "'." << endl;
                 continue;
             }
-            if (choice == 1) {
-                string value_str;
-                cout << "Enter new inductance: ";
-                getline(cin, value_str);
-                ind->setInductance(parseEngineeringValue(value_str));
-                cout << "Success: Inductance updated." << endl;
-            } else if (choice == 2) {
-                int n1, n2;
-                cout << "Enter new node 1: "; safelyReadInt(n1);
-                cout << "Enter new node 2: "; safelyReadInt(n2);
-                ind->setNodes(n1, n2);
-                cout << "Success: Nodes updated." << endl;
-            } else {
-                cout << "Invalid choice." << endl;
+            addElement(make_unique<Inductor>(name, inductance, n1, n2));
+        } else if (type_str == "VoltageSource") {
+            string waveform_type_str;
+            double offset_or_dc_value, amplitude, frequency;
+            if (!(ss >> waveform_type_str >> offset_or_dc_value >> amplitude >> frequency >> n1 >> n2)) {
+                cout << "Error loading VoltageSource: Invalid format." << endl;
+                continue;
             }
-        } else if (CurrentSource* is = dynamic_cast<CurrentSource*>(comp)) {
-            if (is->getWaveformType() == CurrentSource::Waveform::DC) {
-                cout << "1. DC Value\n2. Nodes\n0. Back to Component Selection" << endl;
-                cout << "Enter your choice: ";
-                safelyReadInt(choice);
-                if (choice == 0) {
-                    pauseSystem();
-                    continue;
-                }
-                if (choice == 1) {
-                    string value_str;
-                    cout << "Enter new DC value: ";
-                    getline(cin, value_str);
-                    is->setDCOffsetValue(parseEngineeringValue(value_str));
-                    cout << "Success: DC value updated." << endl;
-                } else if (choice == 2) {
-                    int n1, n2;
-                    cout << "Enter new nodes: "; safelyReadInt(n1); safelyReadInt(n2);
-                    is->setNodes(n1, n2);
-                    cout << "Success: Nodes updated." << endl;
-                } else { cout << "Invalid choice." << endl; }
+            if (waveform_type_str == "DC") {
+                addElement(make_unique<VoltageSource>(name, offset_or_dc_value, n1, n2));
+            } else if (waveform_type_str == "SINE") {
+                addElement(make_unique<VoltageSource>(name, offset_or_dc_value, amplitude, frequency, n1, n2));
             } else {
-                cout << "1. Offset\n2. Amplitude\n3. Frequency\n4. Nodes\n0. Back to Component Selection" << endl;
-                cout << "Enter your choice: ";
-                safelyReadInt(choice);
-                if (choice == 0) {
-                    pauseSystem();
-                    continue;
-                }
-                switch(choice) {
-                    case 1: { double v; cout << "Enter new offset: "; safelyReadDouble(v); is->setDCOffsetValue(v); cout << "Success.\n"; break; }
-                    case 2: { double v; cout << "Enter new amplitude: "; safelyReadDouble(v); is->setAmplitude(v); cout << "Success.\n"; break; }
-                    case 3: { double v; cout << "Enter new frequency: "; safelyReadDouble(v); is->setFrequency(v); cout << "Success.\n"; break; }
-                    case 4: { int n1, n2; cout << "Enter new nodes: "; safelyReadInt(n1); safelyReadInt(n2); is->setNodes(n1, n2); cout << "Success.\n"; break; }
-                    default: { cout << "Invalid choice.\n"; break; }
-                }
+                cout << "Unknown waveform type for VoltageSource: " << waveform_type_str << endl;
             }
-        } else if (VoltageSource* vs = dynamic_cast<VoltageSource*>(comp)) {
-            if (vs->getWaveformType() == VoltageSource::Waveform::DC) {
-                cout << "1. DC Value\n2. Nodes\n0. Back to Component Selection" << endl;
-                cout << "Enter your choice: ";
-                safelyReadInt(choice);
-                if (choice == 0) {
-                    pauseSystem();
-                    continue;
-                }
-                if (choice == 1) {
-                    string value_str;
-                    cout << "Enter new DC value: ";
-                    getline(cin, value_str);
-                    vs->setDCOffsetValue(parseEngineeringValue(value_str));
-                    cout << "Success: DC value updated." << endl;
-                } else if (choice == 2) {
-                    int n1, n2;
-                    cout << "Enter new nodes: "; safelyReadInt(n1); safelyReadInt(n2);
-                    vs->setNodes(n1, n2);
-                    cout << "Success: Nodes updated." << endl;
-                } else { cout << "Invalid choice." << endl; }
+        } else if (type_str == "CurrentSource") {
+            string waveform_type_str;
+            double offset_or_dc_value, amplitude, frequency;
+            if (!(ss >> waveform_type_str >> offset_or_dc_value >> amplitude >> frequency >> n1 >> n2)) {
+                cout << "Error loading CurrentSource: Invalid format." << endl;
+                continue;
+            }
+            if (waveform_type_str == "DC") {
+                addElement(make_unique<CurrentSource>(name, offset_or_dc_value, n1, n2));
+            } else if (waveform_type_str == "SINE") {
+                addElement(make_unique<CurrentSource>(name, offset_or_dc_value, amplitude, frequency, n1, n2));
             } else {
-                cout << "1. Offset\n2. Amplitude\n3. Frequency\n4. Nodes\n0. Back to Component Selection" << endl;
-                cout << "Enter your choice: ";
-                safelyReadInt(choice);
-                if (choice == 0) {
-                    pauseSystem();
-                    continue;
-                }
-                switch(choice) {
-                    case 1: { double v; cout << "Enter new offset: "; safelyReadDouble(v); vs->setDCOffsetValue(v); cout << "Success.\n"; break; }
-                    case 2: { double v; cout << "Enter new amplitude: "; safelyReadDouble(v); vs->setAmplitude(v); cout << "Success.\n"; break; }
-                    case 3: { double v; cout << "Enter new frequency: "; safelyReadDouble(v); vs->setFrequency(v); cout << "Success.\n"; break; }
-                    case 4: { int n1, n2; cout << "Enter new nodes: "; safelyReadInt(n1); safelyReadInt(n2); vs->setNodes(n1, n2); cout << "Success.\n"; break; }
-                    default: { cout << "Invalid choice.\n"; break; }
-                }
+                cout << "Unknown waveform type for CurrentSource: " << waveform_type_str << endl;
             }
+        } else {
+            cout << "Unknown element type: " << type_str << endl;
         }
-        pauseSystem();
     }
+
+    inFile.close();
+    cout << "Circuit '" << loadedCircuitName << "' loaded from '" << filename << "'." << endl;
+    return true;
 }
 
-void displayMenu() {
-    cout << "\n\n========== Circuit Editor Menu ==========" << endl;
-    cout << "1. Add Component" << endl;
-    cout << "2. Display Circuit" << endl;
-    cout << "3. Remove Component" << endl;
-    cout << "4. Modify Component" << endl;
-    cout << "5. Run Transient Analysis" << endl;
-    cout << "6. Run Multiple Variables Analysis" << endl;
-    cout << "7. Run DC Voltage Sweep Analysis" << endl;
-    cout << "8. Run DC Current Sweep Analysis" << endl;
-    cout << "9. Display Existing Nodes" << endl;
-    cout << "10. Rename Node" << endl;
-    cout << "11. Exit" << endl;
-    cout << "=======================================" << endl;
-    cout << "Enter your choice: ";
+void handleSaveCircuit(const Circuit& circuit) {
+    cout << "\n--- Save Circuit ---" << endl;
+    cout << "Enter filename to save (e.g., my_circuit.txt): ";
+    string filename;
+    getline(cin, filename);
+    if (filename.empty()) {
+        cout << "Filename cannot be empty." << endl;
+        return;
+    }
+    circuit.saveCircuit(filename);
 }
 
-int getUserChoice() {
+void handleLoadCircuit(Circuit& circuit) {
+    cout << "\n--- Load Circuit ---" << endl;
+    cout << "Enter filename to load (e.g., my_circuit.txt): ";
+    string filename;
+    getline(cin, filename);
+    if (filename.empty()) {
+        cout << "Filename cannot be empty." << endl;
+        return;
+    }
+    circuit.loadCircuit(filename);
+}
+
+void CircuitManager::createNewCircuit() {
+    string name;
+    cout << "Enter a name for the new circuit: ";
+    getline(cin, name);
+    if (name.empty()) {
+        name = "Circuit " + to_string(circuits.size() + 1);
+    }
+    circuits.push_back(make_unique<Circuit>(name));
+    activeCircuitIndex = circuits.size() - 1;
+    cout << "New circuit '" << name << "' created and set as active." << endl;
+}
+
+void CircuitManager::displayAllCircuits() const {
+    if (circuits.empty()) {
+        cout << "No circuits available." << endl;
+        return;
+    }
+    cout << "\n--- Available Circuits ---" << endl;
+    for (size_t i = 0; i < circuits.size(); ++i) {
+        cout << i + 1 << ". " << circuits[i]->getCircuitName();
+        if (i == activeCircuitIndex) {
+            cout << " (Active)";
+        }
+        cout << endl;
+    }
+    cout << "--------------------------" << endl;
+}
+
+Circuit* CircuitManager::getActiveCircuit() const {
+    if (activeCircuitIndex >= 0 && activeCircuitIndex < circuits.size()) {
+        return circuits[activeCircuitIndex].get();
+    }
+    return nullptr;
+}
+
+void CircuitManager::selectCircuit() {
+    displayAllCircuits();
+    if (circuits.empty()) {
+        return;
+    }
     int choice;
-    string line;
-    getline(cin, line);
-    stringstream ss(line);
-    if (ss >> choice && (ss >> ws).eof()) {
-        return choice;
+    cout << "Enter the number of the circuit to activate (or 'b' to go back): ";
+    string choice_str;
+    getline(cin, choice_str);
+    if (choice_str == "b" || choice_str == "B") return;
+
+    stringstream ss(choice_str);
+    if (!(ss >> choice)) {
+        cout << "Invalid input. Please enter a number." << endl;
+        return;
     }
-    return -1;
+
+    if (choice > 0 && choice <= circuits.size()) {
+        activeCircuitIndex = choice - 1;
+        cout << "Circuit '" << circuits[activeCircuitIndex]->getCircuitName() << "' is now active." << endl;
+    } else {
+        cout << "Invalid circuit number." << endl;
+    }
 }
 
-
-void pauseSystem() {
-    cout << "\nPress Enter to continue...";
-    cin.get();
-}
-
-bool safelyReadDouble(double& val, const string& prompt) {
-    string line;
-    while (true) {
-        cout << prompt;
-        getline(cin, line);
-        if (line == "b" || line == "B") return false;
-        stringstream ss(line);
-        if (ss >> val && (ss >> ws).eof()) {
-            return true;
+void CircuitManager::removeActiveCircuit() {
+    if (activeCircuitIndex != -1) {
+        cout << "Are you sure you want to delete circuit '" << circuits[activeCircuitIndex]->getCircuitName() << "'? (y/n): ";
+        string confirm;
+        getline(cin, confirm);
+        if (confirm == "y" || confirm == "Y") {
+            circuits.erase(circuits.begin() + activeCircuitIndex);
+            cout << "Active circuit deleted." << endl;
+            if (!circuits.empty()) {
+                activeCircuitIndex = 0; // Set first circuit as active
+                cout << "First circuit '" << circuits[activeCircuitIndex]->getCircuitName() << "' is now active." << endl;
+            } else {
+                activeCircuitIndex = -1; // No circuits left
+                cout << "No circuits left." << endl;
+            }
+        } else {
+            cout << "Circuit deletion cancelled." << endl;
         }
-        cout << "Invalid input. Please enter a numeric value." << endl;
+    } else {
+        cout << "No active circuit to delete." << endl;
     }
 }
 
-void safelyReadDouble(double& val) {
-    string line;
-    while(true){
-        getline(cin, line);
-        stringstream ss(line);
-        if (ss >> val && (ss >> ws).eof()) {
-            return;
-        }
-        cout << "Invalid input. Please enter a numeric value: ";
-    }
+void handleNewCircuit(CircuitManager& manager) {
+    manager.createNewCircuit();
 }
 
-
-bool safelyReadInt(int& val, const string& prompt) {
-    string line;
-    while (true) {
-        cout << prompt;
-        getline(cin, line);
-        if (line == "b" || line == "B") return false;
-        stringstream ss(line);
-        if (ss >> val && (ss >> ws).eof()) {
-            return true;
-        }
-        cout << "Invalid input. Please enter an integer value." << endl;
-    }
-}
-
-void safelyReadInt(int& val) {
-    string line;
-    while(true){
-        getline(cin, line);
-        stringstream ss(line);
-        if (ss >> val && (ss >> ws).eof()) {
-            return;
-        }
-        cout << "Invalid input. Please enter an integer value: ";
-    }
+void handleDisplayAndSelectCircuits(CircuitManager& manager) {
+    manager.selectCircuit();
 }
