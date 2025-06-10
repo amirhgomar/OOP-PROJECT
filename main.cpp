@@ -594,6 +594,13 @@ void Circuit::displayCircuit() const {
 }
 
 bool Circuit::setupAndSolveMNA(double time, double timeStep) {
+    if (!hasGround()) {
+        cout << "Error: Circuit must have a ground node (0) for simulation." << endl;
+        nodeVoltages.clear();
+        componentCurrents.clear();
+        return false;
+    }
+
     set<int> all_nodes = getAllNodes();
     int max_node = 0;
     if (!all_nodes.empty()){
@@ -653,7 +660,7 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
                 G(idx2, idx1) -= conductance;
             }
         } else if (auto cap = dynamic_cast<Capacitor*>(comp.get())) {
-            double G_c = 1e-12; // Default small conductance to prevent division by zero for 0 capacitance
+            double G_c = 1e-12;
             if (timeStep > 0 && cap->getCapacitance() > 0) {
                 G_c = cap->getCapacitance() / timeStep;
                 double v1_prev = previousNodeVoltages.count(n1) ? previousNodeVoltages.at(n1) : 0.0;
@@ -669,7 +676,7 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
                 G(idx2, idx1) -= G_c;
             }
         } else if (auto ind = dynamic_cast<Inductor*>(comp.get())) {
-            double G_l = 1e9; // Default large conductance to approximate short for 0 inductance or timeStep
+            double G_l = 1e9;
             if (timeStep > 0 && ind->getInductance() > 0) {
                 G_l = timeStep / ind->getInductance();
                 double i_prev = previousComponentCurrents.count(ind->getName()) ? previousComponentCurrents.at(ind->getName()) : 0.0;
@@ -702,7 +709,6 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
     }
 
     Eigen::VectorXd X;
-    // Check for singularity before solving
     if (G.determinant() == 0) {
         cout << "Error: Circuit matrix is singular. Cannot be solved. Check for floating nodes or invalid connections." << endl;
         nodeVoltages.clear();
@@ -738,28 +744,9 @@ bool Circuit::setupAndSolveMNA(double time, double timeStep) {
             } else {
                 componentCurrents[cap->getName()] = 0.0;
             }
-        } else if (auto ind = dynamic_cast<Inductor*>(comp.get())) {
-            if (timeStep > 0 && ind->getInductance() > 0) {
-                double i_prev = previousComponentCurrents.count(ind->getName()) ? previousComponentCurrents.at(ind->getName()) : 0.0;
-                double v1_now = getNodeVoltage(ind->getNode1());
-                double v2_now = getNodeVoltage(ind->getNode2());
-                componentCurrents[ind->getName()] = i_prev + (timeStep / ind->getInductance()) * (v1_now - v2_now);
-            } else {
-                double v1 = getNodeVoltage(ind->getNode1());
-                double v2 = getNodeVoltage(ind->getNode2());
-                // For DC analysis or zero time step, inductor acts as a short circuit.
-                // The current is indeterminate by MNA unless it's in series with a voltage source.
-                // A common simplification is to treat it as a very low resistance.
-                // However, without transient history, it's just a short, so current is determined by the loop.
-                // For now, setting it to 0 or a very large value might cause issues.
-                // This part needs careful consideration for DC analysis of inductors.
-                // For now, a simple approximation to avoid division by zero or large numbers:
-                componentCurrents[ind->getName()] = (v1 - v2) * 1e9; // Approximating as very high resistance
-            }
-        } else if (auto cs = dynamic_cast<CurrentSource*>(comp.get())) {
-            componentCurrents[cs->getName()] = cs->getValueAtTime(time);
         }
     }
+
     return true;
 }
 
@@ -806,7 +793,6 @@ void Circuit::simulateTransient(double startTime, double endTime, double timeSte
     componentCurrents.clear();
     previousNodeVoltages.clear();
     previousComponentCurrents.clear();
-
     for(int node : all_nodes) {
         previousNodeVoltages[node] = 0.0;
     }
@@ -823,6 +809,21 @@ void Circuit::simulateTransient(double startTime, double endTime, double timeSte
         }
 
         cout << "  Node " << targetNode << " Voltage: " << scientific << setprecision(4) << getNodeVoltage(targetNode) << " V" << endl;
+
+        for (const auto& comp : components) {
+            if (auto ind = dynamic_cast<Inductor*>(comp.get())) {
+                double current = getComponentCurrent(comp->getName());
+                double previousCurrent = previousComponentCurrents[comp->getName()];
+                double voltage = getNodeVoltage(ind->getNode1()) - getNodeVoltage(ind->getNode2());
+                double inductance = ind->getInductance();
+
+                double dI = (voltage / inductance) * timeStep;
+                current += dI;
+
+                componentCurrents[comp->getName()] = current;
+            }
+        }
+
         previousNodeVoltages = nodeVoltages;
         previousComponentCurrents = componentCurrents;
     }
@@ -991,6 +992,7 @@ void Circuit::simulateDCCurrentSweep(double startCurrent, double endCurrent, dou
     sweepSource->setDCOffsetValue(originalCurrent);
     cout << "--- DC Current Sweep Finished ---" << endl;
 }
+
 
 bool Circuit::hasGround() const {
     for (const auto& comp : components) {
